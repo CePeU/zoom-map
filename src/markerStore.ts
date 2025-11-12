@@ -1,0 +1,147 @@
+import { App, Notice, TAbstractFile, TFile, normalizePath } from "obsidian";
+
+export interface MarkerLayer {
+  id: string;
+  name: string;
+  visible: boolean;
+}
+
+export interface Marker {
+  id: string;
+  x: number; // 0..1 relative to image width
+  y: number; // 0..1 relative to image height
+  layer: string; // layer.id
+  link?: string; // e.g. [[Note]]
+  iconKey?: string;
+  tooltip?: string;
+}
+
+export interface BaseImage {
+  path: string;
+  name?: string;
+}
+
+export interface ImageOverlay {
+  path: string;
+  visible: boolean;
+  name?: string;
+}
+
+/* ---- Ruler / scale data ---- */
+export type DistanceUnit = "m" | "km" | "mi" | "ft" | "auto-metric" | "auto-imperial";
+
+export interface MeasurementConfig {
+  displayUnit: DistanceUnit;          // UI unit
+  metersPerPixel?: number;            // fallback if base-specific scale is missing
+  scales?: Record<string, number>;    // per base image: metersPerPixel
+}
+
+export interface MarkerFileData {
+  image: string; // active base image (back-compat)
+  size?: { w: number; h: number };
+  layers: MarkerLayer[];
+  markers: Marker[];
+
+  // Image layers
+  bases?: Array<string | BaseImage>;
+  overlays?: ImageOverlay[];
+  activeBase?: string;
+
+  // Ruler / scale
+  measurement?: MeasurementConfig;
+}
+
+export function generateId(prefix = "m"): string {
+  const s = Math.random().toString(36).slice(2, 8);
+  return `${prefix}_${s}`;
+}
+
+export class MarkerStore {
+  private app: App;
+  private sourcePath: string;
+  private markersFilePath: string;
+
+  constructor(app: App, sourcePath: string, markersFilePath: string) {
+    this.app = app;
+    this.sourcePath = sourcePath;
+    this.markersFilePath = normalizePath(markersFilePath);
+  }
+
+  getPath(): string { return this.markersFilePath; }
+
+  async ensureExists(initialImagePath?: string, size?: { w: number; h: number }): Promise<void> {
+    const abs = this.getFileByPath(this.markersFilePath);
+    if (abs) return;
+    const data: MarkerFileData = {
+      image: initialImagePath ?? "",
+      size,
+      layers: [{ id: "default", name: "Default", visible: true }],
+      markers: [],
+      bases: initialImagePath ? [initialImagePath] : [],
+      overlays: [],
+      activeBase: initialImagePath ?? "",
+      measurement: { displayUnit: "auto-metric", metersPerPixel: undefined, scales: {} }
+    };
+    await this.create(JSON.stringify(data, null, 2));
+    new Notice(`Created marker file: ${this.markersFilePath}`, 2500);
+  }
+
+  async load(): Promise<MarkerFileData> {
+    const f = this.getFileByPath(this.markersFilePath);
+    if (!f) throw new Error(`Marker file missing: ${this.markersFilePath}`);
+    const raw = await this.app.vault.read(f);
+    const parsed = JSON.parse(raw) as MarkerFileData;
+
+    if (!parsed.layers || parsed.layers.length === 0) parsed.layers = [{ id: "default", name: "Default", visible: true }];
+    if (!parsed.markers) parsed.markers = [];
+
+    if (!parsed.bases) parsed.bases = parsed.image ? [parsed.image] : [];
+    if (!parsed.activeBase) parsed.activeBase =
+      parsed.image ?? (Array.isArray(parsed.bases) ? (typeof parsed.bases[0] === "string" ? parsed.bases[0] : (parsed.bases[0] as any)?.path) : "") ?? "";
+    if (!parsed.overlays) parsed.overlays = [];
+
+    if (!parsed.measurement) parsed.measurement = { displayUnit: "auto-metric", metersPerPixel: undefined, scales: {} };
+    if (!parsed.measurement.scales) parsed.measurement.scales = {};
+    if (!parsed.measurement.displayUnit) parsed.measurement.displayUnit = "auto-metric";
+
+    return parsed;
+  }
+
+  async save(data: MarkerFileData): Promise<void> {
+    const f = this.getFileByPath(this.markersFilePath);
+    const content = JSON.stringify(data, null, 2);
+    if (!f) await this.create(content);
+    else await this.app.vault.modify(f, content);
+  }
+
+  async wouldChange(data: MarkerFileData): Promise<boolean> {
+    const f = this.getFileByPath(this.markersFilePath);
+    const next = JSON.stringify(data, null, 2);
+    if (!f) return true;
+    const cur = await this.app.vault.read(f);
+    return cur !== next;
+  }
+
+  async addMarker(data: MarkerFileData, m: Marker): Promise<MarkerFileData> {
+    data.markers.push(m);
+    await this.save(data);
+    return data;
+  }
+
+  async updateLayers(data: MarkerFileData, layers: MarkerLayer[]): Promise<MarkerFileData> {
+    data.layers = layers;
+    await this.save(data);
+    return data;
+  }
+
+  private getFileByPath(path: string): TFile | null {
+    const af: TAbstractFile | null = this.app.vault.getAbstractFileByPath(path);
+    return af instanceof TFile ? af : null;
+  }
+
+  private async create(content: string) {
+    const dir = this.markersFilePath.split("/").slice(0, -1).join("/");
+    if (dir && !this.app.vault.getAbstractFileByPath(dir)) await this.app.vault.createFolder(dir);
+    await this.app.vault.create(this.markersFilePath, content);
+  }
+}

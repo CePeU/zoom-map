@@ -2167,6 +2167,20 @@ var ZoomMapSettingTab = class extends import_obsidian6.PluginSettingTab {
       }
     };
     renderIcons();
+    renderIcons();
+    new import_obsidian6.Setting(containerEl).setName("Add new icon").setDesc("Creates an empty icon entry; pick a file or paste a data URL.").addButton((b) => b.setButtonText("Add").onClick(async () => {
+      const idx = this.plugin.settings.icons.length + 1;
+      this.plugin.settings.icons.push({
+        key: `pin-${idx}`,
+        pathOrDataUrl: "",
+        // empty on purpose; choose via folder button
+        size: 24,
+        anchorX: 12,
+        anchorY: 12
+      });
+      await this.plugin.saveSettings();
+      this.display();
+    }));
     containerEl.createEl("h3", { text: "Favorites (presets)" });
     const presetsHead = containerEl.createDiv({ cls: "zm-presets-grid-head zm-grid" });
     ["Name", "Icon", "Layer", "Editor", "Link", ""].forEach((h) => presetsHead.createSpan({ text: h }));

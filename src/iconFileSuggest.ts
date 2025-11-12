@@ -1,0 +1,23 @@
+import { App, FuzzySuggestModal, TFile } from "obsidian";
+
+export class ImageFileSuggestModal extends FuzzySuggestModal<TFile> {
+  private appRef: App;
+  private onChoose: (file: TFile) => void;
+  private files: TFile[];
+
+  constructor(app: App, onChoose: (file: TFile) => void) {
+    super(app);
+    this.appRef = app;
+    this.onChoose = onChoose;
+    const exts = new Set(["png","jpg","jpeg","gif","svg","webp"]);
+    this.files = this.appRef.vault.getFiles().filter(f => {
+      const m = f.extension?.toLowerCase();
+      return exts.has(m);
+    });
+    this.setPlaceholder("Choose image file…");
+  }
+
+  getItems(): TFile[] { return this.files; }
+  getItemText(item: TFile): string { return item.path; }
+  onChooseItem(item: TFile): void { this.onChoose(item); }
+}
