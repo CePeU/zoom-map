@@ -143,6 +143,7 @@ export class MapInstance extends Component {
   // Measurement state
   private measuring = false;
   private measurePts: Point[] = [];
+
   private measurePreview: Point | null = null;
 
   // Calibration state
@@ -161,6 +162,9 @@ export class MapInstance extends Component {
   private pinchStartScale = 1;
   private pinchStartDist = 0;
   private pinchPrevCenter: { x: number; y: number } | null = null;
+
+  // NEW: aktuell tatsächlich geladenes Basisbild (gegen Early-Return-Bug)
+  private currentBasePath: string | null = null;
 
   constructor(app: App, plugin: ZoomMapPlugin, el: HTMLElement, cfg: ZoomMapConfig) {
     super();
@@ -343,6 +347,7 @@ export class MapInstance extends Component {
     this.baseBitmap = bmp;
     this.imgW = bmp.width;
     this.imgH = bmp.height;
+    this.currentBasePath = path; // wichtig: tatsächlich geladenes Bild merken
   }
 
   // ====== NEW: Overlay-Loading on demand (Canvas mode) ======
@@ -613,6 +618,7 @@ export class MapInstance extends Component {
       this.imgEl.onerror = () => reject(new Error("Failed to load image."));
       this.imgEl.src = url;
     });
+    this.currentBasePath = path; // wichtig: tatsächlich geladenes Bild merken
   }
 
   private resolveTFile(pathOrWiki: string, from: string): TFile | null {
@@ -906,7 +912,23 @@ export class MapInstance extends Component {
     ];
 
     const items: ZMMenuItem[] = [
-      { label: "Add marker here", action: () => this.addMarkerInteractive(nx, ny) },
+      { label: "Add marker here", action: () => this.addMarkerInteractive(nx, ny) }
+    ];
+
+    // NEW: Favorites (Presets) wieder im Kontextmenü, mit Icon
+    if (this.plugin.settings.presets && this.plugin.settings.presets.length > 0) {
+      const favs: ZMMenuItem[] = this.plugin.settings.presets.map(p => {
+        const ico = this.getIconInfo(p.iconKey);
+        return {
+          label: p.name || "(unnamed)",
+          iconUrl: ico.imgUrl,
+          action: () => this.placePresetAt(p, nx, ny)
+        };
+      });
+      items.push({ label: "Favorites", children: favs });
+    }
+
+    items.push(
       { type: "separator" },
       { label: "Image layers",
         children: [
@@ -941,7 +963,7 @@ export class MapInstance extends Component {
       { label: "Zoom −", action: () => this.zoomAt(vx, vy, 1/1.2) },
       { label: "Fit to window", action: () => this.fitToView() },
       { label: "Reset view", action: () => this.applyTransform(1, (this.vw - this.imgW) / 2, (this.vh - this.imgH) / 2) }
-    ];
+    );
 
     this.openMenu = new ZMMenu();
     this.openMenu.open(e.clientX, e.clientY, items);
@@ -1266,7 +1288,9 @@ export class MapInstance extends Component {
 
   private async setActiveBase(path: string) {
     if (!this.data) return;
-    if (this.getActiveBasePath() === path && (this.imgW > 0 && this.imgH > 0)) return;
+
+    // FIX: Vergleiche mit tatsächlich geladenem Bild, nicht mit getActiveBasePath()
+    if (this.currentBasePath === path && (this.imgW > 0 && this.imgH > 0)) return;
 
     this.data.activeBase = path;
     this.data.image = path;
@@ -1282,6 +1306,7 @@ export class MapInstance extends Component {
         this.imgEl.onerror = () => reject(new Error("Failed to load image."));
         this.imgEl.src = url;
       });
+      this.currentBasePath = path; // konsistent setzen
     }
 
     this.renderAll();

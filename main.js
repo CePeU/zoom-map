@@ -334,6 +334,8 @@ var MapInstance = class extends import_obsidian4.Component {
     this.pinchStartScale = 1;
     this.pinchStartDist = 0;
     this.pinchPrevCenter = null;
+    // NEW: aktuell tatsächlich geladenes Basisbild (gegen Early-Return-Bug)
+    this.currentBasePath = null;
     this.saveDataSoon = /* @__PURE__ */ (() => {
       let t = null;
       return async () => {
@@ -558,6 +560,7 @@ var MapInstance = class extends import_obsidian4.Component {
     this.baseBitmap = bmp;
     this.imgW = bmp.width;
     this.imgH = bmp.height;
+    this.currentBasePath = path;
   }
   // ====== NEW: Overlay-Loading on demand (Canvas mode) ======
   async loadCanvasSourceFromPath(path) {
@@ -801,6 +804,7 @@ var MapInstance = class extends import_obsidian4.Component {
       this.imgEl.onerror = () => reject(new Error("Failed to load image."));
       this.imgEl.src = url;
     });
+    this.currentBasePath = path;
   }
   resolveTFile(pathOrWiki, from) {
     const byPath = this.app.vault.getAbstractFileByPath(pathOrWiki);
@@ -1133,7 +1137,20 @@ var MapInstance = class extends import_obsidian4.Component {
       } }
     ];
     const items = [
-      { label: "Add marker here", action: () => this.addMarkerInteractive(nx, ny) },
+      { label: "Add marker here", action: () => this.addMarkerInteractive(nx, ny) }
+    ];
+    if (this.plugin.settings.presets && this.plugin.settings.presets.length > 0) {
+      const favs = this.plugin.settings.presets.map((p) => {
+        const ico = this.getIconInfo(p.iconKey);
+        return {
+          label: p.name || "(unnamed)",
+          iconUrl: ico.imgUrl,
+          action: () => this.placePresetAt(p, nx, ny)
+        };
+      });
+      items.push({ label: "Favorites", children: favs });
+    }
+    items.push(
       { type: "separator" },
       {
         label: "Image layers",
@@ -1195,7 +1212,7 @@ var MapInstance = class extends import_obsidian4.Component {
       { label: "Zoom \u2212", action: () => this.zoomAt(vx, vy, 1 / 1.2) },
       { label: "Fit to window", action: () => this.fitToView() },
       { label: "Reset view", action: () => this.applyTransform(1, (this.vw - this.imgW) / 2, (this.vh - this.imgH) / 2) }
-    ];
+    );
     this.openMenu = new ZMMenu();
     this.openMenu.open(e.clientX, e.clientY, items);
     const outside = (ev) => {
@@ -1528,7 +1545,7 @@ var MapInstance = class extends import_obsidian4.Component {
   }
   async setActiveBase(path) {
     if (!this.data) return;
-    if (this.getActiveBasePath() === path && (this.imgW > 0 && this.imgH > 0)) return;
+    if (this.currentBasePath === path && (this.imgW > 0 && this.imgH > 0)) return;
     this.data.activeBase = path;
     this.data.image = path;
     if (this.isCanvas()) {
@@ -1549,6 +1566,7 @@ var MapInstance = class extends import_obsidian4.Component {
         this.imgEl.onerror = () => reject(new Error("Failed to load image."));
         this.imgEl.src = url;
       });
+      this.currentBasePath = path;
     }
     this.renderAll();
     this.applyTransform(this.scale, this.tx, this.ty);

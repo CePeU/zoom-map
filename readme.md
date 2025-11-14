@@ -20,7 +20,7 @@ Copy these files from the build into that folder: manifest.json, main.js, styles
 Reload Obsidian → Settings → Community plugins → enable “Zoom Map”
 2. Add a code block to a note
 
-#```zoommap
+~~~zoommap
 image: Assets/Map.jpg
 # markers is optional; defaults to <image>.markers.json
 # markers: Assets/Map.jpg.markers.json
@@ -33,6 +33,7 @@ align: right       # left | center | right
 wrap: true        # only left/right useful -> Text flows
 resizeHandle: both  # left | right | both | native (right)
 render: canvas   # or: dom
+~~~
 
 3) Interact
 - Shift+Click to add a marker
