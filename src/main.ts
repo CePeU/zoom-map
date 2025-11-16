@@ -85,16 +85,19 @@ function parseScaleYaml(v: any): number | undefined {
 async function readSavedFrame(app: App, markersPath: string): Promise<{ w: number; h: number } | null> {
   try {
     const file = app.vault.getAbstractFileByPath(normalizePath(markersPath));
-    if (!(file instanceof TFile)) return null;
-    const raw = await app.vault.read(file);
-    const json = JSON.parse(raw);
-    const fw = Number(json?.frame?.w), fh = Number(json?.frame?.h);
-    if (Number.isFinite(fw) && Number.isFinite(fh) && fw > 0 && fh > 0) {
-      return { w: Math.round(fw), h: Math.round(fh) };
-    }
-  } catch { /* ignore */ }
-  return null;
-}
+	if (!(file instanceof TFile)) return null;
+	const raw = await app.vault.read(file);
+	const json = JSON.parse(raw);
+	const fw = Number(json?.frame?.w), fh = Number(json?.frame?.h);
+	if (Number.isFinite(fw) && Number.isFinite(fh)) {
+	  // Unrealistische/defekte Werte ignorieren (z. B. 1×1)
+	  if (fw >= 48 && fh >= 48) {
+	    return { w: Math.round(fw), h: Math.round(fh) };
+	}
+  }
+	} catch { /* ignore */ }
+	return null;
+	}
 
 export default class ZoomMapPlugin extends Plugin {
   settings: ZoomMapSettings = DEFAULT_SETTINGS;

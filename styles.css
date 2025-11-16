@@ -1,5 +1,14 @@
 /* Root and viewport */
-.zm-root { position: relative; width: 100%; height: 480px; background: var(--background-secondary); border: 1px solid var(--background-modifier-border); border-radius: 6px; overflow: hidden; }
+.zm-root {
+box-sizing: border-box;
+position: relative;
+width: 100%;
+height: 480px;
+background: var(--background-secondary);
+border: 1px solid var(--background-modifier-border);
+border-radius: 6px;
+overflow: hidden;
+}
 .zm-root, .zm-viewport, .zm-world { -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent; }
 .zm-viewport { position: absolute; inset: 0; overflow: hidden; touch-action: none; background: var(--background-primary); }
 

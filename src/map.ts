@@ -106,6 +106,15 @@ export class MapInstance extends Component {
   private calibPath!: SVGPathElement;
   private calibDots!: SVGGElement;
   private measureHud!: HTMLDivElement;
+  
+  private initialLayoutDone = false;
+  private isFrameVisibleEnough(minPx = 48): boolean {
+	if (!this.el || !this.el.isConnected) return false;
+	// Wenn ein Vorfahr display:none ist → offsetParent null
+	if ((this.el as HTMLElement).offsetParent === null) return false;
+	const rect = this.el.getBoundingClientRect();
+	return rect.width >= minPx && rect.height >= minPx;
+  }
 
   private overlayMap: Map<string, HTMLImageElement> = new Map();
 
@@ -618,17 +627,28 @@ export class MapInstance extends Component {
   }
 
   private onResize() {
-    if (!this.ready || !this.data) {
-      if (this.isCanvas()) this.renderCanvas();
-      return;
-    }
-    const r = this.viewportEl.getBoundingClientRect();
-    this.vw = r.width; this.vh = r.height;
-    this.applyTransform(this.scale, this.tx, this.ty, true);
+	if (!this.ready || !this.data) {
+	if (this.isCanvas()) this.renderCanvas();
+	return;
+	}
 
-    if (this.shouldUseSavedFrame() && this.cfg.resizable && this.cfg.resizeHandle === "native" && !this.userResizing) {
-      this.requestPersistFrame();
-    }
+	const r = this.viewportEl.getBoundingClientRect();
+	this.vw = r.width;
+	this.vh = r.height;
+
+	this.applyTransform(this.scale, this.tx, this.ty, true);
+
+	// Nur bei nativen Handles automatisch persistieren
+	if (this.shouldUseSavedFrame() && this.cfg.resizable && this.cfg.resizeHandle === "native" && !this.userResizing) {
+	// Erste Resize-Notification nach Mount ignorieren
+	if (!this.initialLayoutDone) {
+	this.initialLayoutDone = true;
+	} else if (this.isFrameVisibleEnough()) {
+	this.requestPersistFrame();
+	} else {
+	// Map ist unsichtbar/zusammengeklappt (z. B. beim Wechsel in Edit-Mode) → nicht speichern
+	}
+   }
   }
 
   private onWheel(e: WheelEvent) {
@@ -1683,15 +1703,34 @@ export class MapInstance extends Component {
     }, delay);
   }
   private async persistFrameNow() {
-    if (!this.data || !this.shouldUseSavedFrame()) return;
-    const rect = this.el.getBoundingClientRect();
-    const w = Math.max(1, Math.round(rect.width));
-    const h = Math.max(1, Math.round(rect.height));
-    const prev = this.data.frame;
-    if (!prev || prev.w !== w || prev.h !== h) {
-      this.data.frame = { w, h };
-      await this.saveDataSoon();
-    }
+	if (!this.data || !this.shouldUseSavedFrame()) return;
+
+	// Nicht speichern, wenn die Karte gerade nicht sichtbar/zu klein ist
+	if (!this.isFrameVisibleEnough(48)) return;
+
+	// Ganzzahlige border-box-Maße
+	const wNow = this.el.offsetWidth;
+	const hNow = this.el.offsetHeight;
+
+	// Extra-Schutz: nichts <48px persistieren
+	if (wNow < 48 || hNow < 48) return;
+
+	const prev = this.data.frame;
+	const tol = 1; // 1px Toleranz gegen Render-Drift
+
+	// Wenn beide Seiten sich nur um <=1px unterscheiden → nicht speichern
+	if (prev && Math.abs(wNow - prev.w) <= tol && Math.abs(hNow - prev.h) <= tol) {
+	return;
+	}
+
+	// Diff ≤1px? Alte Seite übernehmen, sonst neue
+	const w = prev && Math.abs(wNow - prev.w) <= tol ? prev.w : wNow;
+	const h = prev && Math.abs(hNow - prev.h) <= tol ? prev.h : hNow;
+
+	if (!prev || w !== prev.w || h !== prev.h) {
+	this.data.frame = { w, h };
+	await this.saveDataSoon();
+	}
   }
 
   private applyMeasureStyle() {

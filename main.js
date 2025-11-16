@@ -325,6 +325,7 @@ function basename(p) {
 var MapInstance = class extends import_obsidian4.Component {
   constructor(app, plugin, el, cfg) {
     super();
+    this.initialLayoutDone = false;
     this.overlayMap = /* @__PURE__ */ new Map();
     this.baseCanvas = null;
     this.ctx = null;
@@ -393,6 +394,12 @@ var MapInstance = class extends import_obsidian4.Component {
     this.el = el;
     this.cfg = cfg;
     this.store = new MarkerStore(app, cfg.sourcePath, cfg.markersPath);
+  }
+  isFrameVisibleEnough(minPx = 48) {
+    if (!this.el || !this.el.isConnected) return false;
+    if (this.el.offsetParent === null) return false;
+    const rect = this.el.getBoundingClientRect();
+    return rect.width >= minPx && rect.height >= minPx;
   }
   isCanvas() {
     return this.cfg.renderMode === "canvas";
@@ -860,7 +867,12 @@ var MapInstance = class extends import_obsidian4.Component {
     this.vh = r.height;
     this.applyTransform(this.scale, this.tx, this.ty, true);
     if (this.shouldUseSavedFrame() && this.cfg.resizable && this.cfg.resizeHandle === "native" && !this.userResizing) {
-      this.requestPersistFrame();
+      if (!this.initialLayoutDone) {
+        this.initialLayoutDone = true;
+      } else if (this.isFrameVisibleEnough()) {
+        this.requestPersistFrame();
+      } else {
+      }
     }
   }
   onWheel(e) {
@@ -1996,11 +2008,18 @@ var MapInstance = class extends import_obsidian4.Component {
   }
   async persistFrameNow() {
     if (!this.data || !this.shouldUseSavedFrame()) return;
-    const rect = this.el.getBoundingClientRect();
-    const w = Math.max(1, Math.round(rect.width));
-    const h = Math.max(1, Math.round(rect.height));
+    if (!this.isFrameVisibleEnough(48)) return;
+    const wNow = this.el.offsetWidth;
+    const hNow = this.el.offsetHeight;
+    if (wNow < 48 || hNow < 48) return;
     const prev = this.data.frame;
-    if (!prev || prev.w !== w || prev.h !== h) {
+    const tol = 1;
+    if (prev && Math.abs(wNow - prev.w) <= tol && Math.abs(hNow - prev.h) <= tol) {
+      return;
+    }
+    const w = prev && Math.abs(wNow - prev.w) <= tol ? prev.w : wNow;
+    const h = prev && Math.abs(hNow - prev.h) <= tol ? prev.h : hNow;
+    if (!prev || w !== prev.w || h !== prev.h) {
       this.data.frame = { w, h };
       await this.saveDataSoon();
     }
@@ -2226,8 +2245,10 @@ async function readSavedFrame(app, markersPath) {
     const raw = await app.vault.read(file);
     const json = JSON.parse(raw);
     const fw = Number((_a = json == null ? void 0 : json.frame) == null ? void 0 : _a.w), fh = Number((_b = json == null ? void 0 : json.frame) == null ? void 0 : _b.h);
-    if (Number.isFinite(fw) && Number.isFinite(fh) && fw > 0 && fh > 0) {
-      return { w: Math.round(fw), h: Math.round(fh) };
+    if (Number.isFinite(fw) && Number.isFinite(fh)) {
+      if (fw >= 48 && fh >= 48) {
+        return { w: Math.round(fw), h: Math.round(fh) };
+      }
     }
   } catch (e) {
   }
