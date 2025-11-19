@@ -4,7 +4,7 @@ export interface MarkerLayer {
   id: string;
   name: string;
   visible: boolean;
-  // Neu: Layer-Lock (Marker dieses Layers nicht verschiebbar)
+  // Layer-Lock (Marker dieses Layers nicht verschiebbar)
   locked?: boolean;
 }
 
@@ -19,7 +19,7 @@ export interface Marker {
   iconKey?: string; // for pin markers
   tooltip?: string;
 
-  // v0.4.4: optional type + sticker fields
+  // optional type + sticker fields
   type?: MarkerKind;
   stickerPath?: string;   // vault path or data URL
   stickerSize?: number;   // px (rendered in image space; scales with zoom)
@@ -37,7 +37,13 @@ export interface ImageOverlay {
 }
 
 /* ---- Ruler / scale data ---- */
-export type DistanceUnit = "m" | "km" | "mi" | "ft" | "auto-metric" | "auto-imperial";
+export type DistanceUnit =
+  | "m"
+  | "km"
+  | "mi"
+  | "ft"
+  | "auto-metric"
+  | "auto-imperial";
 
 export interface MeasurementConfig {
   displayUnit: DistanceUnit;          // UI unit
@@ -79,21 +85,34 @@ export class MarkerStore {
     this.markersFilePath = normalizePath(markersFilePath);
   }
 
-  getPath(): string { return this.markersFilePath; }
+  getPath(): string {
+    return this.markersFilePath;
+  }
 
-  async ensureExists(initialImagePath?: string, size?: { w: number; h: number }): Promise<void> {
+  async ensureExists(
+    initialImagePath?: string,
+    size?: { w: number; h: number },
+  ): Promise<void> {
     const abs = this.getFileByPath(this.markersFilePath);
     if (abs) return;
+
     const data: MarkerFileData = {
       image: initialImagePath ?? "",
       size,
-      layers: [{ id: "default", name: "Default", visible: true, locked: false }],
+      layers: [
+        { id: "default", name: "Default", visible: true, locked: false },
+      ],
       markers: [],
       bases: initialImagePath ? [initialImagePath] : [],
       overlays: [],
       activeBase: initialImagePath ?? "",
-      measurement: { displayUnit: "auto-metric", metersPerPixel: undefined, scales: {} }
+      measurement: {
+        displayUnit: "auto-metric",
+        metersPerPixel: undefined,
+        scales: {},
+      },
     };
+
     await this.create(JSON.stringify(data, null, 2));
     new Notice(`Created marker file: ${this.markersFilePath}`, 2500);
   }
@@ -101,29 +120,58 @@ export class MarkerStore {
   async load(): Promise<MarkerFileData> {
     const f = this.getFileByPath(this.markersFilePath);
     if (!f) throw new Error(`Marker file missing: ${this.markersFilePath}`);
+
     const raw = await this.app.vault.read(f);
     const parsed = JSON.parse(raw) as MarkerFileData;
 
     // Defaults / Back-Compat
-    if (!parsed.layers || parsed.layers.length === 0) parsed.layers = [{ id: "default", name: "Default", visible: true, locked: false }];
+    if (!parsed.layers || parsed.layers.length === 0) {
+      parsed.layers = [
+        { id: "default", name: "Default", visible: true, locked: false },
+      ];
+    }
+
     // Layer-Felder normalisieren
-    parsed.layers = parsed.layers.map(l => ({
+    parsed.layers = parsed.layers.map((l) => ({
       id: l.id,
       name: l.name ?? "Layer",
       visible: typeof l.visible === "boolean" ? l.visible : true,
-      locked: !!l.locked
+      locked: !!l.locked,
     }));
 
     if (!parsed.markers) parsed.markers = [];
 
-    if (!parsed.bases) parsed.bases = parsed.image ? [parsed.image] : [];
-    if (!parsed.activeBase) parsed.activeBase =
-      parsed.image ?? (Array.isArray(parsed.bases) ? (typeof parsed.bases[0] === "string" ? parsed.bases[0] : (parsed.bases[0] as any)?.path) : "") ?? "";
+    if (!parsed.bases) {
+      parsed.bases = parsed.image ? [parsed.image] : [];
+    }
+
+    if (!parsed.activeBase) {
+      const firstBase = parsed.bases[0];
+      const firstPath =
+        typeof firstBase === "string"
+          ? firstBase
+          : firstBase && typeof firstBase === "object"
+          ? typeof (firstBase as BaseImage).path === "string"
+            ? (firstBase as BaseImage).path
+            : ""
+          : "";
+
+      parsed.activeBase = parsed.image || firstPath || "";
+    }
+
     if (!parsed.overlays) parsed.overlays = [];
 
-    if (!parsed.measurement) parsed.measurement = { displayUnit: "auto-metric", metersPerPixel: undefined, scales: {} };
+    if (!parsed.measurement) {
+      parsed.measurement = {
+        displayUnit: "auto-metric",
+        metersPerPixel: undefined,
+        scales: {},
+      };
+    }
     if (!parsed.measurement.scales) parsed.measurement.scales = {};
-    if (!parsed.measurement.displayUnit) parsed.measurement.displayUnit = "auto-metric";
+    if (!parsed.measurement.displayUnit) {
+      parsed.measurement.displayUnit = "auto-metric";
+    }
 
     return parsed;
   }
@@ -131,8 +179,11 @@ export class MarkerStore {
   async save(data: MarkerFileData): Promise<void> {
     const f = this.getFileByPath(this.markersFilePath);
     const content = JSON.stringify(data, null, 2);
-    if (!f) await this.create(content);
-    else await this.app.vault.modify(f, content);
+    if (!f) {
+      await this.create(content);
+    } else {
+      await this.app.vault.modify(f, content);
+    }
   }
 
   async wouldChange(data: MarkerFileData): Promise<boolean> {
@@ -149,8 +200,11 @@ export class MarkerStore {
     return data;
   }
 
-  async updateLayers(data: MarkerFileData, layers: MarkerLayer[]): Promise<MarkerFileData> {
-    data.layers = layers.map(l => ({ ...l, locked: !!l.locked }));
+  async updateLayers(
+    data: MarkerFileData,
+    layers: MarkerLayer[],
+  ): Promise<MarkerFileData> {
+    data.layers = layers.map((l) => ({ ...l, locked: !!l.locked }));
     await this.save(data);
     return data;
   }
@@ -162,7 +216,9 @@ export class MarkerStore {
 
   private async create(content: string) {
     const dir = this.markersFilePath.split("/").slice(0, -1).join("/");
-    if (dir && !this.app.vault.getAbstractFileByPath(dir)) await this.app.vault.createFolder(dir);
+    if (dir && !this.app.vault.getAbstractFileByPath(dir)) {
+      await this.app.vault.createFolder(dir);
+    }
     await this.app.vault.create(this.markersFilePath, content);
   }
 }
