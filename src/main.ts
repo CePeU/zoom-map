@@ -201,15 +201,14 @@ export default class ZoomMapPlugin extends Plugin {
 
         const sectionInfo = ctx.getSectionInfo(el);
         const defaultId = `map-${sectionInfo?.lineStart ?? Date.now()}`;
+        const idFromYaml = opts["id"];
         const mapId =
-          typeof opts["id"] === "string" && opts["id"].trim()
-            ? (opts["id"] as string).trim()
+          typeof idFromYaml === "string" && idFromYaml.trim()
+            ? idFromYaml.trim()
             : defaultId;
 
         const markersPathRaw =
-          typeof opts["markers"] === "string"
-            ? (opts["markers"] as string)
-            : undefined;
+          typeof opts["markers"] === "string" ? opts["markers"] : undefined;
         const minZoom =
           typeof opts["minZoom"] === "number" ? opts["minZoom"] : 0.25;
         const maxZoom =
@@ -234,7 +233,7 @@ export default class ZoomMapPlugin extends Plugin {
         const extraClasses: string[] = Array.isArray(classesValue)
           ? (classesValue as unknown[]).map((c) => String(c))
           : typeof classesValue === "string"
-          ? (classesValue as string)
+          ? classesValue
               .split(/\s+/)
               .map((c) => c.trim())
               .filter(Boolean)
@@ -379,7 +378,7 @@ class ZoomMapSettingTab extends PluginSettingTab {
     new Setting(containerEl).setName("Storage").setHeading();
 
     new Setting(containerEl)
-      .setName("Storage location (default)")
+      .setName("Storage location by default")
       .setDesc(
         "Store your data in json or inline.",
       )

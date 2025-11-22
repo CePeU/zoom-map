@@ -222,5 +222,10 @@ export class MarkerStore {
 }
 
 function isBaseImage(x: unknown): x is BaseImage {
-  return !!x && typeof x === "object" && typeof (x as any).path === "string";
+  return (
+    !!x &&
+    typeof x === "object" &&
+    "path" in x &&
+    typeof (x as { path?: unknown }).path === "string"
+  );
 }

@@ -39,7 +39,7 @@ export class MarkerEditorModal extends Modal {
     if (this.marker.type !== "sticker") {
       new Setting(contentEl)
         .setName("Link")
-        .setDesc("Wiki link Note.")
+        .setDesc("Wiki link note.")
         .addText((t) =>
           t
             .setPlaceholder("Note")

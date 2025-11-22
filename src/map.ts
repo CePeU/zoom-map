@@ -117,7 +117,7 @@ function setCssProps(
 
 // ImageBitmap guard (to avoid unnecessary type assertions)
 function isImageBitmapLike(x: unknown): x is ImageBitmap {
-  return !!x && typeof (x as any).close === "function";
+  return !!x && typeof (x as { close?: unknown }).close === "function";
 }
 
 export class MapInstance extends Component {
@@ -1928,7 +1928,7 @@ export class MapInstance extends Component {
 
       if (m.type !== "sticker") {
         host.addEventListener("mouseenter", (ev) =>
-          this.onMarkerEnter(ev as MouseEvent, m, host),
+          this.onMarkerEnter(ev, m, host),
         );
         host.addEventListener("mouseleave", () => this.hideTooltipSoon());
       }
@@ -2643,10 +2643,18 @@ class ZMMenu {
         }
 
         row.addEventListener("click", () => {
-          if (it.action) {
-            void Promise.resolve(it.action(row, this)).catch((err) =>
-              console.error("Menu item action failed:", err),
-            );
+          if (!it.action) return;
+          try {
+            const maybe = it.action(row, this);
+            // If it returned a Promise, attach a rejection handler,
+            // but never return the Promise from this handler:
+            if (maybe && typeof (maybe as Promise<unknown>).catch === "function") {
+              (maybe as Promise<unknown>).catch((err) =>
+                console.error("Menu item action failed:", err),
+              );
+            }
+          } catch (err) {
+            console.error("Menu item action failed:", err);
           }
         });
       }

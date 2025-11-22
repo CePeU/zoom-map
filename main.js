@@ -146,7 +146,7 @@ var MarkerStore = class {
   }
 };
 function isBaseImage(x) {
-  return !!x && typeof x === "object" && typeof x.path === "string";
+  return !!x && typeof x === "object" && "path" in x && typeof x.path === "string";
 }
 
 // src/markerEditor.ts
@@ -167,7 +167,7 @@ var MarkerEditorModal = class extends import_obsidian2.Modal {
       text: this.marker.type === "sticker" ? "Edit sticker" : "Edit marker"
     });
     if (this.marker.type !== "sticker") {
-      new import_obsidian2.Setting(contentEl).setName("Link").setDesc("Wiki link Note.").addText(
+      new import_obsidian2.Setting(contentEl).setName("Link").setDesc("Wiki link note.").addText(
         (t) => {
           var _a;
           return t.setPlaceholder("Note").setValue((_a = this.marker.link) != null ? _a : "").onChange((v) => {
@@ -2640,10 +2640,16 @@ var ZMMenu = class {
           img.src = it.iconUrl;
         }
         row.addEventListener("click", () => {
-          if (it.action) {
-            void Promise.resolve(it.action(row, this)).catch(
-              (err) => console.error("Menu item action failed:", err)
-            );
+          if (!it.action) return;
+          try {
+            const maybe = it.action(row, this);
+            if (maybe && typeof maybe.catch === "function") {
+              maybe.catch(
+                (err) => console.error("Menu item action failed:", err)
+              );
+            }
+          } catch (err) {
+            console.error("Menu item action failed:", err);
           }
         });
       }
@@ -2849,7 +2855,8 @@ var ZoomMapPlugin = class extends import_obsidian7.Plugin {
         const storageMode = storageRaw === "note" || storageRaw === "inline" || storageRaw === "in-note" ? "note" : storageRaw === "json" ? "json" : (_a = this.settings.storageDefault) != null ? _a : "json";
         const sectionInfo = ctx.getSectionInfo(el);
         const defaultId = `map-${(_b = sectionInfo == null ? void 0 : sectionInfo.lineStart) != null ? _b : Date.now()}`;
-        const mapId = typeof opts["id"] === "string" && opts["id"].trim() ? opts["id"].trim() : defaultId;
+        const idFromYaml = opts["id"];
+        const mapId = typeof idFromYaml === "string" && idFromYaml.trim() ? idFromYaml.trim() : defaultId;
         const markersPathRaw = typeof opts["markers"] === "string" ? opts["markers"] : void 0;
         const minZoom = typeof opts["minZoom"] === "number" ? opts["minZoom"] : 0.25;
         const maxZoom = typeof opts["maxZoom"] === "number" ? opts["maxZoom"] : 8;
@@ -2963,7 +2970,7 @@ var ZoomMapSettingTab = class extends import_obsidian7.PluginSettingTab {
     containerEl.empty();
     containerEl.addClass("zoommap-settings");
     new import_obsidian7.Setting(containerEl).setName("Storage").setHeading();
-    new import_obsidian7.Setting(containerEl).setName("Storage location (default)").setDesc(
+    new import_obsidian7.Setting(containerEl).setName("Storage location by default").setDesc(
       "Store your data in json or inline."
     ).addDropdown((d) => {
       var _a2;
