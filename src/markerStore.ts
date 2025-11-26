@@ -6,6 +6,11 @@ export interface MarkerLayer {
   visible: boolean;
   // Layer-Lock (Marker dieses Layers nicht verschiebbar)
   locked?: boolean;
+
+  // Optional: an ein Basisbild (Base) binden – Pfad der Base (wie in bases[].path)
+  // Wenn gesetzt, wird der Layer beim Wechsel auf diese Base automatisch sichtbar,
+  // und bei anderen Bases automatisch unsichtbar.
+  boundBase?: string;
 }
 
 export type MarkerKind = "pin" | "sticker";
@@ -132,11 +137,16 @@ export class MarkerStore {
     }
 
     // Layer-Felder normalisieren
-    parsed.layers = parsed.layers.map((l) => ({
+    parsed.layers = parsed.layers.map((l: any) => ({
       id: l.id,
       name: l.name ?? "Layer",
       visible: typeof l.visible === "boolean" ? l.visible : true,
       locked: !!l.locked,
+      // boundBase nur übernehmen, wenn ein nicht-leerer String
+      boundBase:
+        typeof l.boundBase === "string" && l.boundBase.trim()
+          ? l.boundBase
+          : undefined,
     }));
 
     if (!parsed.markers) parsed.markers = [];
@@ -202,6 +212,7 @@ export class MarkerStore {
     data: MarkerFileData,
     layers: MarkerLayer[],
   ): Promise<MarkerFileData> {
+    // alle Felder mitschreiben; locked normalisieren
     data.layers = layers.map((l) => ({ ...l, locked: !!l.locked }));
     await this.save(data);
     return data;

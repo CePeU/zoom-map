@@ -81,7 +81,9 @@ var MarkerStore = class {
         id: l.id,
         name: (_a = l.name) != null ? _a : "Layer",
         visible: typeof l.visible === "boolean" ? l.visible : true,
-        locked: !!l.locked
+        locked: !!l.locked,
+        // boundBase nur übernehmen, wenn ein nicht-leerer String
+        boundBase: typeof l.boundBase === "string" && l.boundBase.trim() ? l.boundBase : void 0
       };
     });
     if (!parsed.markers) parsed.markers = [];
@@ -796,13 +798,21 @@ var MapInstance = class extends import_obsidian8.Component {
     if (this.isCanvas()) {
       this.el.classList.add("zm-root--canvas-mode");
     }
-    if (this.cfg.width) {
-      this.el.style.width = this.cfg.width;
+    if (this.cfg.responsive) {
+      this.el.classList.add("zm-root--responsive");
     }
-    if (this.cfg.height) {
-      this.el.style.height = this.cfg.height;
+    if (this.cfg.responsive) {
+      this.el.style.width = "100%";
+      this.el.style.height = "auto";
+    } else {
+      if (this.cfg.width) {
+        this.el.style.width = this.cfg.width;
+      }
+      if (this.cfg.height) {
+        this.el.style.height = this.cfg.height;
+      }
     }
-    if (this.cfg.resizable) {
+    if (!this.cfg.responsive && this.cfg.resizable) {
       if (this.cfg.resizeHandle === "native") {
         this.el.classList.add("resizable-native");
       } else {
@@ -838,6 +848,7 @@ var MapInstance = class extends import_obsidian8.Component {
     this.registerDomEvent(this.viewportEl, "wheel", (e) => {
       var _a2;
       if ((_a2 = e.target) == null ? void 0 : _a2.closest(".popover")) return;
+      if (this.cfg.responsive) return;
       e.preventDefault();
       e.stopPropagation();
       this.onWheel(e);
@@ -872,6 +883,7 @@ var MapInstance = class extends import_obsidian8.Component {
       }
     });
     this.registerDomEvent(this.viewportEl, "dblclick", (e) => {
+      if (this.cfg.responsive) return;
       e.preventDefault();
       e.stopPropagation();
       this.closeMenu();
@@ -916,6 +928,9 @@ var MapInstance = class extends import_obsidian8.Component {
       })
     );
     await this.loadInitialBase(this.cfg.imagePath);
+    if (this.cfg.responsive) {
+      this.updateResponsiveAspectRatio();
+    }
     await this.store.ensureExists(this.cfg.imagePath, {
       w: this.imgW,
       h: this.imgH
@@ -953,12 +968,20 @@ var MapInstance = class extends import_obsidian8.Component {
       var _a2;
       return (_a2 = this.ro) == null ? void 0 : _a2.disconnect();
     });
-    this.fitToView();
+    if (this.cfg.responsive) {
+      this.fitToView();
+    } else {
+      this.fitToView();
+    }
     await this.applyActiveBaseAndOverlays();
     this.setupMeasureOverlay();
     this.applyMeasureStyle();
     this.renderAll();
     this.ready = true;
+  }
+  updateResponsiveAspectRatio() {
+    if (!this.imgW || !this.imgH) return;
+    this.el.style.aspectRatio = `${this.imgW} / ${this.imgH}`;
   }
   disposeBitmaps() {
     try {
@@ -1337,6 +1360,11 @@ var MapInstance = class extends import_obsidian8.Component {
     const r = this.viewportEl.getBoundingClientRect();
     this.vw = r.width;
     this.vh = r.height;
+    if (this.cfg.responsive) {
+      this.fitToView();
+      if (this.isCanvas()) this.renderCanvas();
+      return;
+    }
     this.applyTransform(this.scale, this.tx, this.ty, true);
     if (this.shouldUseSavedFrame() && this.cfg.resizable && this.cfg.resizeHandle === "native" && !this.userResizing) {
       if (!this.initialLayoutDone) {
@@ -1369,6 +1397,7 @@ var MapInstance = class extends import_obsidian8.Component {
     });
     (_b = (_a = e.target) == null ? void 0 : _a.setPointerCapture) == null ? void 0 : _b.call(_a, e.pointerId);
     if ((_c = e.target) == null ? void 0 : _c.closest(".zm-marker")) return;
+    if (this.cfg.responsive) return;
     if (this.activePointers.size === 2) {
       this.startPinch();
       return;
@@ -1631,6 +1660,24 @@ var MapInstance = class extends import_obsidian8.Component {
     const l = this.getLayerById(layerId);
     return !!(l && l.visible && l.locked);
   }
+  // Neu: Sichtbarkeit für gebundene Layer nach aktivem Base setzen
+  async applyBoundBaseVisibility() {
+    if (!this.data) return;
+    const active = this.getActiveBasePath();
+    let changed = false;
+    for (const l of this.data.layers) {
+      if (!l.boundBase) continue;
+      const want = l.boundBase === active;
+      if (l.visible !== want) {
+        l.visible = want;
+        changed = true;
+      }
+    }
+    if (changed) {
+      this.renderMarkersOnly();
+      await this.saveDataSoon();
+    }
+  }
   onContextMenuViewport(e) {
     var _a, _b, _c, _d, _e;
     if (!this.ready || !this.data) return;
@@ -1789,8 +1836,9 @@ var MapInstance = class extends import_obsidian8.Component {
     const layerChildren = this.data.layers.map((layer) => {
       const state = this.getLayerState(layer);
       const { mark, color } = this.triStateIndicator(state);
+      const label = layer.name + (layer.boundBase ? " (bound)" : "");
       return {
-        label: layer.name,
+        label,
         mark,
         markColor: color,
         action: (rowEl) => {
@@ -1807,34 +1855,52 @@ var MapInstance = class extends import_obsidian8.Component {
         }
       };
     });
-    const renameItems = this.data.layers.map((l) => ({
-      label: l.name,
-      action: () => {
-        new RenameLayerModal(this.app, l, (newName) => {
-          void this.renameMarkerLayer(l, newName);
-        }).open();
-      }
-    }));
-    const deleteItems = this.data.layers.map((l) => ({
-      label: l.name,
-      action: () => {
-        const others = this.data.layers.filter((x) => x.id !== l.id);
-        if (others.length === 0) {
-          new import_obsidian8.Notice("Cannot delete the last layer.", 2e3);
-          return;
-        }
-        const hasMarkers = this.data.markers.some((m) => m.layer === l.id);
-        new DeleteLayerModal(
-          this.app,
-          l,
-          others,
-          hasMarkers,
-          (decision) => {
-            void this.deleteMarkerLayer(l, decision);
-          }
-        ).open();
-      }
-    }));
+    const labelForBase = (p) => {
+      var _a2;
+      const b = bases.find((bb) => bb.path === p);
+      return b ? (_a2 = b.name) != null ? _a2 : basename(b.path) : basename(p);
+    };
+    const bindLayerSubmenus = this.data.layers.map((l) => {
+      const suffix = l.boundBase ? ` \u2192 ${labelForBase(l.boundBase)}` : " \u2192 None";
+      return {
+        label: `Bind "${l.name}" to base${suffix}`,
+        children: [
+          {
+            label: "None",
+            checked: !l.boundBase,
+            action: (rowEl) => {
+              l.boundBase = void 0;
+              void this.saveDataSoon();
+              const menu = rowEl.parentElement;
+              if (menu) {
+                menu.querySelectorAll(".zm-menu__check").forEach((c) => c.textContent = "");
+                const chk = rowEl.querySelector(".zm-menu__check");
+                if (chk) chk.textContent = "\u2713";
+              }
+            }
+          },
+          { type: "separator" },
+          ...bases.map((b) => {
+            var _a2;
+            return {
+              label: (_a2 = b.name) != null ? _a2 : basename(b.path),
+              checked: l.boundBase === b.path,
+              action: (rowEl) => {
+                l.boundBase = b.path;
+                void this.applyBoundBaseVisibility();
+                void this.saveDataSoon();
+                const menu = rowEl.parentElement;
+                if (menu) {
+                  menu.querySelectorAll(".zm-menu__check").forEach((c) => c.textContent = "");
+                  const chk = rowEl.querySelector(".zm-menu__check");
+                  if (chk) chk.textContent = "\u2713";
+                }
+              }
+            };
+          })
+        ]
+      };
+    });
     const imageLayersChildren = [
       { label: "Base", children: baseItems },
       { label: "Overlays", children: overlayItems },
@@ -1915,32 +1981,61 @@ var MapInstance = class extends import_obsidian8.Component {
         children: [
           ...layerChildren,
           { type: "separator" },
-          { label: "Rename layer\u2026", children: renameItems },
-          { label: "Delete layer\u2026", children: deleteItems }
+          { label: "Bind layer to base", children: bindLayerSubmenus },
+          { type: "separator" },
+          {
+            label: "Rename layer\u2026",
+            children: this.data.layers.map((l) => ({
+              label: l.name,
+              action: () => {
+                new RenameLayerModal(this.app, l, (newName) => {
+                  void this.renameMarkerLayer(l, newName);
+                }).open();
+              }
+            }))
+          },
+          {
+            label: "Delete layer\u2026",
+            children: this.data.layers.map((l) => ({
+              label: l.name,
+              action: () => {
+                const others = this.data.layers.filter((x) => x.id !== l.id);
+                if (others.length === 0) {
+                  new import_obsidian8.Notice("Cannot delete the last layer.", 2e3);
+                  return;
+                }
+                const hasMarkers = this.data.markers.some((m) => m.layer === l.id);
+                new DeleteLayerModal(
+                  this.app,
+                  l,
+                  others,
+                  hasMarkers,
+                  (decision) => {
+                    void this.deleteMarkerLayer(l, decision);
+                  }
+                ).open();
+              }
+            }))
+          }
         ]
-      },
-      { type: "separator" },
-      {
-        label: "Zoom +",
-        action: () => this.zoomAt(vx, vy, 1.2)
-      },
-      {
-        label: "Zoom \u2212",
-        action: () => this.zoomAt(vx, vy, 1 / 1.2)
-      },
-      {
-        label: "Fit to window",
-        action: () => this.fitToView()
-      },
-      {
-        label: "Reset view",
-        action: () => this.applyTransform(
-          1,
-          (this.vw - this.imgW) / 2,
-          (this.vh - this.imgH) / 2
-        )
       }
     );
+    if (!this.cfg.responsive) {
+      items.push(
+        { type: "separator" },
+        { label: "Zoom +", action: () => this.zoomAt(vx, vy, 1.2) },
+        { label: "Zoom \u2212", action: () => this.zoomAt(vx, vy, 1 / 1.2) },
+        { label: "Fit to window", action: () => this.fitToView() },
+        {
+          label: "Reset view",
+          action: () => this.applyTransform(
+            1,
+            (this.vw - this.imgW) / 2,
+            (this.vh - this.imgH) / 2
+          )
+        }
+      );
+    }
     this.openMenu = new ZMMenu();
     this.openMenu.open(e.clientX, e.clientY, items);
     const outside = (ev) => {
@@ -2050,7 +2145,7 @@ var MapInstance = class extends import_obsidian8.Component {
     this.applyTransform(scale, tx, ty);
   }
   updateMarkerInvScaleOnly() {
-    const invScale = 1 / this.scale;
+    const invScale = this.cfg.responsive ? 1 : 1 / this.scale;
     const invs = this.markersEl.querySelectorAll(".zm-marker-inv");
     invs.forEach((el) => {
       el.style.transform = `scale(${invScale})`;
@@ -2267,7 +2362,8 @@ var MapInstance = class extends import_obsidian8.Component {
           m.iconKey
         );
         const inv = host.createDiv({ cls: "zm-marker-inv" });
-        inv.style.transform = `scale(${1 / s})`;
+        const invScale = this.cfg.responsive ? 1 : 1 / s;
+        inv.style.transform = `scale(${invScale})`;
         const anch = inv.createDiv({ cls: "zm-marker-anchor" });
         anch.style.transform = `translate(${-anchorX}px, ${-anchorY}px)`;
         icon = createEl("img", { cls: "zm-marker-icon" });
@@ -2521,8 +2617,16 @@ var MapInstance = class extends import_obsidian8.Component {
       });
       this.currentBasePath = path;
     }
+    if (this.cfg.responsive) {
+      this.updateResponsiveAspectRatio();
+    }
     this.renderAll();
-    this.applyTransform(this.scale, this.tx, this.ty);
+    if (this.cfg.responsive) {
+      this.fitToView();
+    } else {
+      this.applyTransform(this.scale, this.tx, this.ty);
+    }
+    await this.applyBoundBaseVisibility();
     void this.saveDataSoon();
     if (!this.isCanvas()) {
       this.updateOverlaySizes();
@@ -2661,7 +2765,7 @@ var MapInstance = class extends import_obsidian8.Component {
     });
   }
   shouldUseSavedFrame() {
-    return !!this.cfg.resizable && !(this.cfg.widthFromYaml || this.cfg.heightFromYaml);
+    return !!this.cfg.resizable && !(this.cfg.widthFromYaml || this.cfg.heightFromYaml) && !this.cfg.responsive;
   }
   requestPersistFrame(delay = 500) {
     if (this.frameSaveTimer) window.clearTimeout(this.frameSaveTimer);
@@ -2671,6 +2775,7 @@ var MapInstance = class extends import_obsidian8.Component {
     }, delay);
   }
   persistFrameNow() {
+    if (this.cfg.responsive) return;
     if (!this.data || !this.shouldUseSavedFrame()) return;
     if (!this.isFrameVisibleEnough(48)) return;
     const wNow = this.el.offsetWidth;
@@ -3255,6 +3360,7 @@ var ZoomMapPlugin = class extends import_obsidian9.Plugin {
           });
           return;
         }
+        const responsive = typeof opts["responsiv"] === "boolean" && !!opts["responsiv"] || typeof opts["responsive"] === "boolean" && !!opts["responsive"];
         const storageRaw = typeof opts["storage"] === "string" ? opts["storage"].toLowerCase() : "";
         const storageMode = storageRaw === "note" || storageRaw === "inline" || storageRaw === "in-note" ? "note" : storageRaw === "json" ? "json" : (_a = this.settings.storageDefault) != null ? _a : "json";
         const sectionInfo = ctx.getSectionInfo(el);
@@ -3262,8 +3368,8 @@ var ZoomMapPlugin = class extends import_obsidian9.Plugin {
         const idFromYaml = opts["id"];
         const mapId = typeof idFromYaml === "string" && idFromYaml.trim() ? idFromYaml.trim() : defaultId;
         const markersPathRaw = typeof opts["markers"] === "string" ? opts["markers"] : void 0;
-        const minZoom = typeof opts["minZoom"] === "number" ? opts["minZoom"] : 0.25;
-        const maxZoom = typeof opts["maxZoom"] === "number" ? opts["maxZoom"] : 8;
+        const minZoom = responsive ? 1e-6 : typeof opts["minZoom"] === "number" ? opts["minZoom"] : 0.25;
+        const maxZoom = responsive ? 1e6 : typeof opts["maxZoom"] === "number" ? opts["maxZoom"] : 8;
         const markersPath = (0, import_obsidian9.normalizePath)(
           markersPathRaw != null ? markersPathRaw : `${image}.markers.json`
         );
@@ -3272,7 +3378,7 @@ var ZoomMapPlugin = class extends import_obsidian9.Plugin {
         const wrap = typeof opts["wrap"] === "boolean" ? opts["wrap"] : false;
         const classesValue = opts["classes"];
         const extraClasses = Array.isArray(classesValue) ? classesValue.map((c) => String(c)) : typeof classesValue === "string" ? classesValue.split(/\s+/).map((c) => c.trim()).filter(Boolean) : [];
-        const resizable = typeof opts["resizable"] === "boolean" ? opts["resizable"] : this.settings.defaultResizable;
+        const resizable = responsive ? false : typeof opts["resizable"] === "boolean" ? opts["resizable"] : this.settings.defaultResizable;
         const resizeHandleRaw = typeof opts["resizeHandle"] === "string" ? opts["resizeHandle"] : this.settings.defaultResizeHandle;
         const resizeHandle = resizeHandleRaw === "left" || resizeHandleRaw === "right" || resizeHandleRaw === "both" || resizeHandleRaw === "native" ? resizeHandleRaw : "right";
         const widthFromYaml = Object.prototype.hasOwnProperty.call(
@@ -3285,12 +3391,12 @@ var ZoomMapPlugin = class extends import_obsidian9.Plugin {
         );
         const extSettings = this.settings;
         const widthDefault = wrap ? (_c = extSettings.defaultWidthWrapped) != null ? _c : "50%" : this.settings.defaultWidth;
-        let widthCss = toCssSize(opts["width"], widthDefault);
-        let heightCss = toCssSize(
+        let widthCss = responsive ? "100%" : toCssSize(opts["width"], widthDefault);
+        let heightCss = responsive ? "auto" : toCssSize(
           opts["height"],
           this.settings.defaultHeight
         );
-        if (storageMode === "json" && !widthFromYaml && !heightFromYaml) {
+        if (!responsive && storageMode === "json" && !widthFromYaml && !heightFromYaml) {
           const saved = await readSavedFrame(this.app, markersPath);
           if (saved) {
             widthCss = `${Math.max(220, saved.w)}px`;
@@ -3321,7 +3427,8 @@ var ZoomMapPlugin = class extends import_obsidian9.Plugin {
           widthFromYaml,
           heightFromYaml,
           storageMode,
-          mapId
+          mapId,
+          responsive
         };
         const inst = new MapInstance(this.app, this, el, cfg);
         ctx.addChild(inst);

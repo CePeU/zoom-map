@@ -186,6 +186,11 @@ export default class ZoomMapPlugin extends Plugin {
           return;
         }
 
+        // New: responsive flag (German or English key)
+        const responsive =
+          (typeof opts["responsiv"] === "boolean" && !!opts["responsiv"]) ||
+          (typeof opts["responsive"] === "boolean" && !!opts["responsive"]);
+
         const storageRaw =
           typeof opts["storage"] === "string"
             ? opts["storage"].toLowerCase()
@@ -209,10 +214,17 @@ export default class ZoomMapPlugin extends Plugin {
 
         const markersPathRaw =
           typeof opts["markers"] === "string" ? opts["markers"] : undefined;
+
+        // In responsive mode we don't want zoom constraints to interfere with fit scale
         const minZoom =
-          typeof opts["minZoom"] === "number" ? opts["minZoom"] : 0.25;
+          responsive
+            ? 1e-6
+            : (typeof opts["minZoom"] === "number" ? opts["minZoom"] : 0.25);
         const maxZoom =
-          typeof opts["maxZoom"] === "number" ? opts["maxZoom"] : 8;
+          responsive
+            ? 1e6
+            : (typeof opts["maxZoom"] === "number" ? opts["maxZoom"] : 8);
+
         const markersPath = normalizePath(
           markersPathRaw ?? `${image}.markers.json`,
         );
@@ -239,10 +251,13 @@ export default class ZoomMapPlugin extends Plugin {
               .filter(Boolean)
           : [];
 
+        // Resizing disabled in responsive mode
         const resizable =
-          typeof opts["resizable"] === "boolean"
-            ? opts["resizable"]
-            : this.settings.defaultResizable;
+          responsive
+            ? false
+            : (typeof opts["resizable"] === "boolean"
+                ? opts["resizable"]
+                : this.settings.defaultResizable);
 
         const resizeHandleRaw =
           typeof opts["resizeHandle"] === "string"
@@ -270,13 +285,15 @@ export default class ZoomMapPlugin extends Plugin {
           ? extSettings.defaultWidthWrapped ?? "50%"
           : this.settings.defaultWidth;
 
-        let widthCss = toCssSize(opts["width"], widthDefault);
-        let heightCss = toCssSize(
+        // In responsive mode force width 100% and height auto
+        let widthCss = responsive ? "100%" : toCssSize(opts["width"], widthDefault);
+        let heightCss = responsive ? "auto" : toCssSize(
           opts["height"],
           this.settings.defaultHeight,
         );
 
-        if (storageMode === "json" && !widthFromYaml && !heightFromYaml) {
+        // Skip reading saved frame in responsive mode
+        if (!responsive && storageMode === "json" && !widthFromYaml && !heightFromYaml) {
           const saved = await readSavedFrame(this.app, markersPath);
           if (saved) {
             widthCss = `${Math.max(220, saved.w)}px`;
@@ -309,6 +326,7 @@ export default class ZoomMapPlugin extends Plugin {
           heightFromYaml,
           storageMode,
           mapId,
+          responsive,
         };
 
         const inst = new MapInstance(this.app, this, el, cfg);

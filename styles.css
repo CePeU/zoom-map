@@ -10,6 +10,11 @@
   overflow: hidden;
 }
 
+/* Responsive mode: height is derived from the aspect ratio set inline */
+.zm-root.zm-root--responsive {
+  height: auto;
+}
+
 .zm-root,
 .zm-viewport,
 .zm-world {

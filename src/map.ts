@@ -44,6 +44,9 @@ export interface ZoomMapConfig {
 
   storageMode?: "json" | "note";
   mapId?: string;
+
+  // New: fully responsive container (width 100%, height via aspect ratio)
+  responsive?: boolean;
 }
 
 export interface IconProfile {
@@ -283,15 +286,25 @@ export class MapInstance extends Component {
     if (this.isCanvas()) {
       this.el.classList.add("zm-root--canvas-mode");
     }
-
-    if (this.cfg.width) {
-      this.el.style.width = this.cfg.width;
-    }
-    if (this.cfg.height) {
-      this.el.style.height = this.cfg.height;
+    if (this.cfg.responsive) {
+      this.el.classList.add("zm-root--responsive");
     }
 
-    if (this.cfg.resizable) {
+    // In responsive mode, force width 100% and height auto
+    if (this.cfg.responsive) {
+      this.el.style.width = "100%";
+      this.el.style.height = "auto";
+    } else {
+      if (this.cfg.width) {
+        this.el.style.width = this.cfg.width;
+      }
+      if (this.cfg.height) {
+        this.el.style.height = this.cfg.height;
+      }
+    }
+
+    // Resizing grips disabled in responsive
+    if (!this.cfg.responsive && this.cfg.resizable) {
       if (this.cfg.resizeHandle === "native") {
         this.el.classList.add("resizable-native");
       } else {
@@ -340,6 +353,7 @@ export class MapInstance extends Component {
 
     this.registerDomEvent(this.viewportEl, "wheel", (e: WheelEvent) => {
       if ((e.target as HTMLElement | null)?.closest(".popover")) return;
+      if (this.cfg.responsive) return; // disable wheel zoom in responsive mode
       e.preventDefault();
       e.stopPropagation();
       this.onWheel(e);
@@ -377,6 +391,7 @@ export class MapInstance extends Component {
     });
 
     this.registerDomEvent(this.viewportEl, "dblclick", (e: MouseEvent) => {
+      if (this.cfg.responsive) return; // disable dblclick zoom in responsive mode
       e.preventDefault();
       e.stopPropagation();
       this.closeMenu();
@@ -427,6 +442,11 @@ export class MapInstance extends Component {
 
     await this.loadInitialBase(this.cfg.imagePath);
 
+    // In responsive mode: set aspect-ratio from loaded base
+    if (this.cfg.responsive) {
+      this.updateResponsiveAspectRatio();
+    }
+
     await this.store.ensureExists(this.cfg.imagePath, {
       w: this.imgW,
       h: this.imgH,
@@ -457,6 +477,7 @@ export class MapInstance extends Component {
         }
       }
 
+      // Do NOT apply saved frame in responsive mode
       if (
         this.shouldUseSavedFrame() &&
         this.data.frame &&
@@ -472,7 +493,13 @@ export class MapInstance extends Component {
     this.ro.observe(this.el);
     this.register(() => this.ro?.disconnect());
 
-    this.fitToView();
+    // Initial layout
+    if (this.cfg.responsive) {
+      this.fitToView();
+    } else {
+      this.fitToView();
+    }
+
     await this.applyActiveBaseAndOverlays();
     this.setupMeasureOverlay();
 
@@ -480,6 +507,12 @@ export class MapInstance extends Component {
 
     this.renderAll();
     this.ready = true;
+  }
+
+  private updateResponsiveAspectRatio(): void {
+    // Reflect current base image aspect into the container
+    if (!this.imgW || !this.imgH) return;
+    this.el.style.aspectRatio = `${this.imgW} / ${this.imgH}`;
   }
 
   private disposeBitmaps(): void {
@@ -927,6 +960,13 @@ export class MapInstance extends Component {
     this.vw = r.width;
     this.vh = r.height;
 
+    if (this.cfg.responsive) {
+      // Always keep the image perfectly fitted in responsive mode
+      this.fitToView();
+      if (this.isCanvas()) this.renderCanvas();
+      return;
+    }
+
     this.applyTransform(this.scale, this.tx, this.ty, true);
 
     if (
@@ -968,6 +1008,9 @@ export class MapInstance extends Component {
     (e.target as Element | null)?.setPointerCapture?.(e.pointerId);
 
     if ((e.target as HTMLElement | null)?.closest(".zm-marker")) return;
+
+    // Disable pinch/pan in responsive mode
+    if (this.cfg.responsive) return;
 
     if (this.activePointers.size === 2) {
       this.startPinch();
@@ -1131,7 +1174,7 @@ export class MapInstance extends Component {
 
   private endPinch(): void {
     this.pinchActive = false;
-    this.pinchPrevCenter = null;
+       this.pinchPrevCenter = null;
     this.pinchStartDist = 0;
   }
 
@@ -1267,6 +1310,25 @@ export class MapInstance extends Component {
   private isLayerLocked(layerId: string): boolean {
     const l = this.getLayerById(layerId);
     return !!(l && l.visible && l.locked);
+  }
+
+  // Neu: Sichtbarkeit für gebundene Layer nach aktivem Base setzen
+  private async applyBoundBaseVisibility(): Promise<void> {
+    if (!this.data) return;
+    const active = this.getActiveBasePath();
+    let changed = false;
+    for (const l of this.data.layers) {
+      if (!l.boundBase) continue;
+      const want = l.boundBase === active;
+      if (l.visible !== want) {
+        l.visible = want;
+        changed = true;
+      }
+    }
+    if (changed) {
+      this.renderMarkersOnly();
+      await this.saveDataSoon();
+    }
   }
 
   private onContextMenuViewport(e: MouseEvent): void {
@@ -1431,11 +1493,14 @@ export class MapInstance extends Component {
       items.push({ label: "Stickers", children: favStickers });
     }
 
+    // Layer-Liste (Tri-State) – Label ergänzt um "(bound)" wenn gebunden
     const layerChildren: ZMMenuItem[] = this.data.layers.map((layer) => {
       const state = this.getLayerState(layer);
       const { mark, color } = this.triStateIndicator(state);
+      const label =
+        layer.name + (layer.boundBase ? " (bound)" : "");
       return {
-        label: layer.name,
+        label,
         mark,
         markColor: color,
         action: (rowEl) => {
@@ -1453,38 +1518,58 @@ export class MapInstance extends Component {
       };
     });
 
-    // Manage marker layers (rename/delete)
-    const renameItems: ZMMenuItem[] = this.data.layers.map((l) => ({
-      label: l.name,
-      action: () => {
-        new RenameLayerModal(this.app, l, (newName) => {
-          void this.renameMarkerLayer(l, newName);
-        }).open();
-      },
-    }));
+    // Binding-Untermenü: pro Layer "None" + alle Bases
+    const labelForBase = (p: string) => {
+      const b = bases.find((bb) => bb.path === p);
+      return b ? (b.name ?? basename(b.path)) : basename(p);
+    };
 
-    const deleteItems: ZMMenuItem[] = this.data.layers.map((l) => ({
-      label: l.name,
-      action: () => {
-        const others = this.data!.layers.filter((x) => x.id !== l.id);
-        if (others.length === 0) {
-          new Notice("Cannot delete the last layer.", 2000);
-          return;
-        }
-        const hasMarkers = this.data!.markers.some((m) => m.layer === l.id);
-        new DeleteLayerModal(
-          this.app,
-          l,
-          others,
-          hasMarkers,
-          (decision) => {
-            void this.deleteMarkerLayer(l, decision);
+    const bindLayerSubmenus: ZMMenuItem[] = this.data.layers.map((l) => {
+      const suffix = l.boundBase ? ` → ${labelForBase(l.boundBase)}` : " → None";
+      return {
+        label: `Bind "${l.name}" to base${suffix}`,
+        children: [
+          {
+            label: "None",
+            checked: !l.boundBase,
+            action: (rowEl) => {
+              l.boundBase = undefined;
+              void this.saveDataSoon();
+              // Häkchen im Submenü aktualisieren
+              const menu = rowEl.parentElement;
+              if (menu) {
+                menu
+                  .querySelectorAll<HTMLElement>(".zm-menu__check")
+                  .forEach((c) => (c.textContent = ""));
+                const chk = rowEl.querySelector<HTMLElement>(".zm-menu__check");
+                if (chk) chk.textContent = "✓";
+              }
+            },
           },
-        ).open();
-      },
-    }));
+          { type: "separator" },
+          ...bases.map<ZMMenuItem>((b) => ({
+            label: b.name ?? basename(b.path),
+            checked: l.boundBase === b.path,
+            action: (rowEl) => {
+              l.boundBase = b.path;
+              // Sichtbarkeit aller gebundenen Layer gem. aktivem Base anwenden
+              void this.applyBoundBaseVisibility();
+              void this.saveDataSoon();
+              // Häkchen im Submenü aktualisieren
+              const menu = rowEl.parentElement;
+              if (menu) {
+                menu
+                  .querySelectorAll<HTMLElement>(".zm-menu__check")
+                  .forEach((c) => (c.textContent = ""));
+                const chk = rowEl.querySelector<HTMLElement>(".zm-menu__check");
+                if (chk) chk.textContent = "✓";
+              }
+            },
+          })),
+        ],
+      };
+    });
 
-    // Build "Image layers" group with "Add layer" submenu
     const imageLayersChildren: ZMMenuItem[] = [
       { label: "Base", children: baseItems },
       { label: "Overlays", children: overlayItems },
@@ -1504,97 +1589,126 @@ export class MapInstance extends Component {
       },
     ];
 
-    items.push(
-      { type: "separator" },
-      {
-        label: "Image layers",
-        children: imageLayersChildren,
-      },
-      {
-        label: "Measure",
-        children: [
-          {
-            label: this.measuring ? "Stop measuring" : "Start measuring",
-            action: () => {
-              this.measuring = !this.measuring;
-              if (!this.measuring) {
-                this.measurePreview = null;
-              }
-              this.updateMeasureHud();
-              this.renderMeasure();
-            },
-          },
-          {
-            label: "Clear measurement",
-            action: () => {
-              this.clearMeasure();
-            },
-          },
-          {
-            label: "Remove last point",
-            action: () => {
-              if (this.measurePts.length > 0) {
-                this.measurePts.pop();
-                this.renderMeasure();
-              }
-            },
-          },
-          { type: "separator" },
-          { label: "Unit", children: unitItems },
-          { type: "separator" },
-          {
-            label: this.calibrating
-              ? "Stop calibration"
-              : "Calibrate scale…",
-            action: () => {
-              if (this.calibrating) {
-                this.calibrating = false;
-                this.calibPts = [];
-                this.calibPreview = null;
-                this.renderCalibrate();
-              } else {
-                this.calibrating = true;
-                this.calibPts = [];
-                this.calibPreview = null;
-                this.renderCalibrate();
-                new Notice("Calibration: click two points.", 1500);
-              }
-            },
-          },
-        ],
-      },
-      {
-        label: "Marker layers",
-        children: [
-          ...layerChildren,
-          { type: "separator" },
-          { label: "Rename layer…", children: renameItems },
-          { label: "Delete layer…", children: deleteItems },
-        ],
-      },
-      { type: "separator" },
-      {
-        label: "Zoom +",
-        action: () => this.zoomAt(vx, vy, 1.2),
-      },
-      {
-        label: "Zoom −",
-        action: () => this.zoomAt(vx, vy, 1 / 1.2),
-      },
-      {
-        label: "Fit to window",
-        action: () => this.fitToView(),
-      },
-      {
-        label: "Reset view",
-        action: () =>
-          this.applyTransform(
-            1,
-            (this.vw - this.imgW) / 2,
-            (this.vh - this.imgH) / 2,
-          ),
-      },
-    );
+	items.push(
+	  { type: "separator" },
+	  {
+		label: "Image layers",
+		children: imageLayersChildren,
+	  },
+	  {
+		label: "Measure",
+		children: [
+		  {
+			label: this.measuring ? "Stop measuring" : "Start measuring",
+			action: () => {
+			  this.measuring = !this.measuring;
+			  if (!this.measuring) {
+				this.measurePreview = null;
+			  }
+			  this.updateMeasureHud();
+			  this.renderMeasure();
+			},
+		  },
+		  {
+			label: "Clear measurement",
+			action: () => {
+			  this.clearMeasure();
+			},
+		  },
+		  {
+			label: "Remove last point",
+			action: () => {
+			  if (this.measurePts.length > 0) {
+				this.measurePts.pop();
+				this.renderMeasure();
+			  }
+			},
+		  },
+		  { type: "separator" },
+		  { label: "Unit", children: unitItems },
+		  { type: "separator" },
+		  {
+			label: this.calibrating ? "Stop calibration" : "Calibrate scale…",
+			action: () => {
+			  if (this.calibrating) {
+				this.calibrating = false;
+				this.calibPts = [];
+				this.calibPreview = null;
+				this.renderCalibrate();
+			  } else {
+				this.calibrating = true;
+				this.calibPts = [];
+				this.calibPreview = null;
+				this.renderCalibrate();
+				new Notice("Calibration: click two points.", 1500);
+			  }
+			},
+		  },
+		],
+	  },
+	  {
+		label: "Marker layers",
+		children: [
+		  ...layerChildren,
+		  { type: "separator" },
+		  { label: "Bind layer to base", children: bindLayerSubmenus },
+		  { type: "separator" },
+		  {
+			label: "Rename layer…",
+			children: this.data.layers.map((l) => ({
+			  label: l.name,
+			  action: () => {
+				new RenameLayerModal(this.app, l, (newName) => {
+				  void this.renameMarkerLayer(l, newName);
+				}).open();
+			  },
+			})),
+		  },
+		  {
+			label: "Delete layer…",
+			children: this.data.layers.map((l) => ({
+			  label: l.name,
+			  action: () => {
+				const others = this.data!.layers.filter((x) => x.id !== l.id);
+				if (others.length === 0) {
+				  new Notice("Cannot delete the last layer.", 2000);
+				  return;
+				}
+				const hasMarkers = this.data!.markers.some((m) => m.layer === l.id);
+				new DeleteLayerModal(
+				  this.app,
+				  l,
+				  others,
+				  hasMarkers,
+				  (decision) => {
+					void this.deleteMarkerLayer(l, decision);
+				  },
+				).open();
+			  },
+			})),
+		  },
+		],
+	  },
+	);
+
+    // Add zoom/view items only when not responsive
+    if (!this.cfg.responsive) {
+      items.push(
+        { type: "separator" },
+        { label: "Zoom +", action: () => this.zoomAt(vx, vy, 1.2) },
+        { label: "Zoom −", action: () => this.zoomAt(vx, vy, 1 / 1.2) },
+        { label: "Fit to window", action: () => this.fitToView() },
+        {
+          label: "Reset view",
+          action: () =>
+            this.applyTransform(
+              1,
+              (this.vw - this.imgW) / 2,
+              (this.vh - this.imgH) / 2,
+            ),
+        },
+      );
+    }
 
     this.openMenu = new ZMMenu();
     this.openMenu.open(e.clientX, e.clientY, items);
@@ -1731,7 +1845,7 @@ export class MapInstance extends Component {
   }
 
   private updateMarkerInvScaleOnly(): void {
-    const invScale = 1 / this.scale;
+    const invScale = this.cfg.responsive ? 1 : (1 / this.scale);
     const invs =
       this.markersEl.querySelectorAll<HTMLDivElement>(".zm-marker-inv");
     invs.forEach((el) => {
@@ -1971,7 +2085,8 @@ export class MapInstance extends Component {
           m.iconKey,
         );
         const inv = host.createDiv({ cls: "zm-marker-inv" });
-        inv.style.transform = `scale(${1 / s})`;
+        const invScale = this.cfg.responsive ? 1 : (1 / s);
+        inv.style.transform = `scale(${invScale})`;
         const anch = inv.createDiv({ cls: "zm-marker-anchor" });
         anch.style.transform = `translate(${-anchorX}px, ${-anchorY}px)`;
         icon = createEl("img", { cls: "zm-marker-icon" });
@@ -2271,8 +2386,21 @@ export class MapInstance extends Component {
       this.currentBasePath = path;
     }
 
+    // Update aspect ratio and fit when responsive
+    if (this.cfg.responsive) {
+      this.updateResponsiveAspectRatio();
+    }
+
     this.renderAll();
-    this.applyTransform(this.scale, this.tx, this.ty);
+
+    if (this.cfg.responsive) {
+      this.fitToView();
+    } else {
+      this.applyTransform(this.scale, this.tx, this.ty);
+    }
+
+    // Neu: gebundene Layer entsprechend aktueller Base setzen
+    await this.applyBoundBaseVisibility();
     void this.saveDataSoon();
 
     if (!this.isCanvas()) {
@@ -2449,7 +2577,8 @@ export class MapInstance extends Component {
   private shouldUseSavedFrame(): boolean {
     return (
       !!this.cfg.resizable &&
-      !(this.cfg.widthFromYaml || this.cfg.heightFromYaml)
+      !(this.cfg.widthFromYaml || this.cfg.heightFromYaml) &&
+      !this.cfg.responsive
     );
   }
 
@@ -2462,6 +2591,7 @@ export class MapInstance extends Component {
   }
 
   private persistFrameNow(): void {
+    if (this.cfg.responsive) return; // never persist frame in responsive mode
     if (!this.data || !this.shouldUseSavedFrame()) return;
     if (!this.isFrameVisibleEnough(48)) return;
 
@@ -2776,7 +2906,7 @@ export class MapInstance extends Component {
       const m = out[i].match(keyRe);
       if (m) {
         keyIdx = i;
-        keyIndent = m[1] ?? "";
+        keyIndent = (m[1] ?? "");
         after = (m[2] ?? "").trim();
         break;
       }

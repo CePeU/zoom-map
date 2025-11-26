@@ -33,6 +33,7 @@ maxZoom: 8
 height: 560px
 width: 100%
 resizable: true
+responsive: false # true set's the window to max
 align: right       # left | center | right
 wrap: true        # only left/right useful -> Text flows
 resizeHandle: native  # left | right | both | native (right)
@@ -55,6 +56,7 @@ render: canvas   # or: dom
 - resizable: boolean
 - resizeHandle: left | right | both | native
 - render: dom | canvas
+- responsive : true | false
 
 Layers (optional):
 imageBases:
@@ -96,6 +98,12 @@ scale:
 - DOM mode (default): simple, great on desktop
 - Canvas mode: base + overlays are composited into one canvas per frame (reduced flicker on mobile/large images)
 - Overlays load on demand and are released when hidden to reduce memory usage on tablets
+
+## New!!
+- Add new base or overlay layers from context menu.
+- Bind marker layers to base layers. They will turn off/on when switching base layers.
+- Responsive behavior. Set responsive: true in YAML and the picture is displayed resposive. Width it 100%.
+ResizeHandle and other YAML elements like width and height are disabled.
 
 ## Tips
 - Keep base/overlay dimensions identical
