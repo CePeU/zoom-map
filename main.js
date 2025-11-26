@@ -325,16 +325,16 @@ var ScaleCalibrateModal = class extends import_obsidian3.Modal {
       text: `Measured pixel distance: ${this.pxDistance.toFixed(1)} px`
     });
     new import_obsidian3.Setting(contentEl).setName("Real world length").addText((t) => {
-      t.setPlaceholder("example 2");
+      t.setPlaceholder("Example 2");
       t.setValue(this.inputValue);
       t.onChange((v) => {
         this.inputValue = v.trim();
       });
     }).addDropdown((d) => {
-      d.addOption("m", "m");
-      d.addOption("km", "km");
-      d.addOption("mi", "mi");
-      d.addOption("ft", "ft");
+      d.addOption("m", "Meters");
+      d.addOption("km", "Kilometers");
+      d.addOption("mi", "Miles");
+      d.addOption("ft", "Feet");
       d.setValue(this.unit);
       d.onChange((v) => {
         this.unit = v;
@@ -562,90 +562,96 @@ var NamePromptModal = class extends import_obsidian6.Modal {
 // src/layerManageModals.ts
 var import_obsidian7 = require("obsidian");
 var RenameLayerModal = class extends import_obsidian7.Modal {
-  constructor(app, layer, onOk) {
+  constructor(app, layer, onDone) {
+    var _a;
     super(app);
-    this.current = layer;
-    this.onOk = onOk;
-    this.value = layer.name;
+    this.value = "";
+    this.layer = layer;
+    this.onDone = onDone;
+    this.value = (_a = layer.name) != null ? _a : "";
   }
   onOpen() {
     const { contentEl } = this;
     contentEl.empty();
-    contentEl.createEl("h2", { text: `Rename layer: ${this.current.name}` });
+    contentEl.createEl("h2", { text: "Rename layer" });
     new import_obsidian7.Setting(contentEl).setName("New name").addText((t) => {
       t.setValue(this.value);
-      t.onChange((v) => this.value = v);
+      t.onChange((v) => this.value = v.trim());
     });
-    const footer = contentEl.createDiv({ cls: "modal-button-container" });
+    const footer = contentEl.createDiv({
+      attr: { style: "display:flex; gap:8px; justify-content:flex-end; margin-top:12px;" }
+    });
+    const save = footer.createEl("button", { text: "Save" });
     const cancel = footer.createEl("button", { text: "Cancel" });
-    const ok = footer.createEl("button", { text: "Save" });
-    cancel.onclick = () => this.close();
-    ok.onclick = () => {
-      const n = this.value.trim();
-      if (!n) {
-        new import_obsidian7.Notice("Name cannot be empty.", 1500);
-        return;
-      }
+    save.onclick = () => {
+      const name = this.value || this.layer.name;
       this.close();
-      this.onOk(n);
+      this.onDone(name);
     };
+    cancel.onclick = () => this.close();
   }
   onClose() {
     this.contentEl.empty();
   }
 };
 var DeleteLayerModal = class extends import_obsidian7.Modal {
-  constructor(app, layer, others, hasMarkers, onOk) {
+  constructor(app, layer, targets, hasMarkers, onDone) {
     var _a, _b;
     super(app);
-    this.mode = "move";
+    this.mode = "delete-markers";
+    this.targetId = "";
     this.layer = layer;
-    this.others = others;
+    this.targets = targets;
     this.hasMarkers = hasMarkers;
-    this.targetId = (_b = (_a = others[0]) == null ? void 0 : _a.id) != null ? _b : "";
-    this.onOk = onOk;
+    this.onDone = onDone;
+    this.targetId = (_b = (_a = targets[0]) == null ? void 0 : _a.id) != null ? _b : "";
   }
   onOpen() {
     const { contentEl } = this;
     contentEl.empty();
-    contentEl.createEl("h2", { text: `Delete layer: ${this.layer.name}` });
-    const modeSetting = new import_obsidian7.Setting(contentEl).setName("What to do with markers?").setDesc(
-      this.hasMarkers ? "The layer contains markers." : "Layer has no markers."
-    ).addDropdown((d) => {
-      d.addOption("move", "Move to another layer");
+    contentEl.createEl("h2", { text: "Delete layer" });
+    const canMove = this.targets.length > 0;
+    const actionSetting = new import_obsidian7.Setting(contentEl).setName("Action");
+    actionSetting.addDropdown((d) => {
       d.addOption("delete-markers", "Delete markers");
+      if (canMove) d.addOption("move", "Move to layer");
       d.setValue(this.mode);
       d.onChange((v) => {
-        this.mode = v === "delete-markers" ? "delete-markers" : "move";
-        refresh();
+        this.mode = v;
+        targetSetting.settingEl.toggle(this.mode === "move");
       });
     });
-    const targetSetting = new import_obsidian7.Setting(contentEl).setName("Move target").setDesc("Destination layer for existing markers.");
-    targetSetting.addDropdown((d) => {
-      for (const l of this.others) d.addOption(l.id, l.name);
+    const targetSetting = new import_obsidian7.Setting(contentEl).setName("Target layer").addDropdown((d) => {
+      for (const t of this.targets) d.addOption(t.id, t.name);
       d.setValue(this.targetId);
       d.onChange((v) => this.targetId = v);
     });
-    const footer = contentEl.createDiv({ cls: "modal-button-container" });
-    const cancelBtn = footer.createEl("button", { text: "Cancel" });
-    const okBtn = footer.createEl("button", { text: "Delete" });
-    okBtn.addClass("mod-warning");
-    cancelBtn.onclick = () => this.close();
-    okBtn.onclick = () => {
-      var _a;
-      if (this.hasMarkers && this.mode === "move" && !this.targetId) {
-        new import_obsidian7.Notice("Please choose a target layer.", 1500);
-        return;
+    targetSetting.settingEl.toggle(this.mode === "move");
+    if (!this.hasMarkers) {
+      new import_obsidian7.Setting(contentEl).setDesc("This layer has no markers.");
+    }
+    if (!canMove) {
+      new import_obsidian7.Setting(contentEl).setDesc("No other layer available to move markers.");
+    }
+    const footer = contentEl.createDiv({
+      attr: { style: "display:flex; gap:8px; justify-content:flex-end; margin-top:12px;" }
+    });
+    const confirm = footer.createEl("button", { text: "Confirm" });
+    const cancel = footer.createEl("button", { text: "Cancel" });
+    confirm.onclick = () => {
+      if (this.mode === "move") {
+        if (!this.targetId) {
+          this.close();
+          return;
+        }
+        this.close();
+        this.onDone({ mode: "move", targetId: this.targetId });
+      } else {
+        this.close();
+        this.onDone({ mode: "delete-markers" });
       }
-      this.close();
-      const res = this.hasMarkers ? this.mode === "move" ? { mode: "move", targetId: this.targetId } : { mode: "delete-markers" } : { mode: "move", targetId: this.targetId || ((_a = this.others[0]) == null ? void 0 : _a.id) || "" };
-      this.onOk(res);
     };
-    const refresh = () => {
-      const show = this.mode === "move" && this.hasMarkers;
-      targetSetting.settingEl.style.display = show ? "" : "none";
-    };
-    refresh();
+    cancel.onclick = () => this.close();
   }
   onClose() {
     this.contentEl.empty();
@@ -1804,8 +1810,8 @@ var MapInstance = class extends import_obsidian8.Component {
     const renameItems = this.data.layers.map((l) => ({
       label: l.name,
       action: () => {
-        new RenameLayerModal(this.app, l, async (newName) => {
-          await this.renameMarkerLayer(l, newName);
+        new RenameLayerModal(this.app, l, (newName) => {
+          void this.renameMarkerLayer(l, newName);
         }).open();
       }
     }));
@@ -1823,8 +1829,8 @@ var MapInstance = class extends import_obsidian8.Component {
           l,
           others,
           hasMarkers,
-          async (decision) => {
-            await this.deleteMarkerLayer(l, decision);
+          (decision) => {
+            void this.deleteMarkerLayer(l, decision);
           }
         ).open();
       }
@@ -2557,7 +2563,7 @@ var MapInstance = class extends import_obsidian8.Component {
       const pre = new Image();
       pre.decoding = "async";
       pre.src = url;
-      pre.decode().catch((error) => {
+      void pre.decode().catch((error) => {
         console.error("Zoom Map: overlay decode error", error);
       }).finally(() => {
         const el = mkImgEl(url);
@@ -3069,12 +3075,9 @@ var ZMMenu = class {
         row.addEventListener("click", () => {
           if (!it.action) return;
           try {
-            const maybe = it.action(row, this);
-            if (maybe && typeof maybe.catch === "function") {
-              maybe.catch(
-                (err) => console.error("Menu item action failed:", err)
-              );
-            }
+            Promise.resolve(it.action(row, this)).catch(
+              (err) => console.error("Menu item action failed:", err)
+            );
           } catch (err) {
             console.error("Menu item action failed:", err);
           }
@@ -3371,9 +3374,7 @@ var ZoomMapSettingTab = class extends import_obsidian9.PluginSettingTab {
     containerEl.empty();
     containerEl.addClass("zoommap-settings");
     new import_obsidian9.Setting(containerEl).setName("Storage").setHeading();
-    new import_obsidian9.Setting(containerEl).setName("Storage location by default").setDesc(
-      "Store your data in json or inline."
-    ).addDropdown((d) => {
+    new import_obsidian9.Setting(containerEl).setName("Storage location by default").setDesc("You can store your data in JSON format or inline.").addDropdown((d) => {
       var _a2;
       d.addOption("json", "JSON file (beside image)");
       d.addOption("note", "Inside the note (hidden comment)");
@@ -3453,7 +3454,7 @@ var ZoomMapSettingTab = class extends import_obsidian9.PluginSettingTab {
     colorRow.addText(
       (t) => {
         var _a2;
-        return t.setPlaceholder("var(--text-accent)").setValue((_a2 = this.plugin.settings.measureLineColor) != null ? _a2 : "var(--text-accent)").onChange((v) => {
+        return t.setPlaceholder("default").setValue((_a2 = this.plugin.settings.measureLineColor) != null ? _a2 : "var(--text-accent)").onChange((v) => {
           this.plugin.settings.measureLineColor = (v == null ? void 0 : v.trim()) || "var(--text-accent)";
           void this.plugin.saveSettings();
           applyStyleToAll();

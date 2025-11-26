@@ -1457,8 +1457,8 @@ export class MapInstance extends Component {
     const renameItems: ZMMenuItem[] = this.data.layers.map((l) => ({
       label: l.name,
       action: () => {
-        new RenameLayerModal(this.app, l, async (newName) => {
-          await this.renameMarkerLayer(l, newName);
+        new RenameLayerModal(this.app, l, (newName) => {
+          void this.renameMarkerLayer(l, newName);
         }).open();
       },
     }));
@@ -1477,8 +1477,8 @@ export class MapInstance extends Component {
           l,
           others,
           hasMarkers,
-          async (decision) => {
-            await this.deleteMarkerLayer(l, decision);
+          (decision) => {
+            void this.deleteMarkerLayer(l, decision);
           },
         ).open();
       },
@@ -2318,7 +2318,7 @@ export class MapInstance extends Component {
       const pre = new Image();
       pre.decoding = "async";
       pre.src = url;
-      pre
+      void pre
         .decode()
         .catch((error) => {
           console.error("Zoom Map: overlay decode error", error);
@@ -2882,7 +2882,7 @@ export class MapInstance extends Component {
     }
 
     if (decision.mode === "move") {
-      const targetId = (decision as any).targetId;
+      const targetId = decision.targetId;
       if (!targetId || targetId === layer.id) {
         new Notice("Invalid target layer.", 1500);
         return;
@@ -3005,15 +3005,9 @@ class ZMMenu {
         row.addEventListener("click", () => {
           if (!it.action) return;
           try {
-            const maybe = it.action(row, this);
-            if (
-              maybe &&
-              typeof (maybe as Promise<unknown>).catch === "function"
-            ) {
-              (maybe as Promise<unknown>).catch((err) =>
-                console.error("Menu item action failed:", err),
-              );
-            }
+            Promise.resolve(it.action(row, this)).catch((err) =>
+              console.error("Menu item action failed:", err),
+            );
           } catch (err) {
             console.error("Menu item action failed:", err);
           }

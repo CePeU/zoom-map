@@ -226,7 +226,7 @@ export default class ZoomMapPlugin extends Plugin {
 
         const wrap =
           typeof opts["wrap"] === "boolean"
-            ? (opts["wrap"] as boolean)
+            ? (opts["wrap"])
             : false;
 
         const classesValue = opts["classes"];
@@ -379,9 +379,7 @@ class ZoomMapSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("Storage location by default")
-      .setDesc(
-        "Store your data in json or inline.",
-      )
+      .setDesc("You can store your data in JSON format or inline.",)
       .addDropdown((d) => {
         d.addOption("json", "JSON file (beside image)");
         d.addOption("note", "Inside the note (hidden comment)");
@@ -503,7 +501,7 @@ class ZoomMapSettingTab extends PluginSettingTab {
 
     colorRow.addText((t) =>
       t
-        .setPlaceholder("var(--text-accent)")
+        .setPlaceholder("default")
         .setValue(this.plugin.settings.measureLineColor ?? "var(--text-accent)")
         .onChange((v) => {
           this.plugin.settings.measureLineColor =

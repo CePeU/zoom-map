@@ -1,135 +1,138 @@
-import { App, Modal, Setting, Notice } from "obsidian";
+import { App, Modal, Setting } from "obsidian";
 import type { MarkerLayer } from "./markerStore";
 
+export type DeleteLayerDecision =
+| { mode: "move"; targetId: string }
+| { mode: "delete-markers" };
+
 export class RenameLayerModal extends Modal {
-  private current: MarkerLayer;
-  private onOk: (newName: string) => void;
-  private value: string;
+private layer: MarkerLayer;
+private onDone: (newName: string) => void;
+private value = "";
 
-  constructor(app: App, layer: MarkerLayer, onOk: (newName: string) => void) {
-    super(app);
-    this.current = layer;
-    this.onOk = onOk;
-    this.value = layer.name;
-  }
-
-  onOpen(): void {
-    const { contentEl } = this;
-    contentEl.empty();
-    contentEl.createEl("h2", { text: `Rename layer: ${this.current.name}` });
-
-    new Setting(contentEl)
-      .setName("New name")
-      .addText((t) => {
-        t.setValue(this.value);
-        t.onChange((v) => (this.value = v));
-      });
-
-    const footer = contentEl.createDiv({ cls: "modal-button-container" });
-    const cancel = footer.createEl("button", { text: "Cancel" });
-    const ok = footer.createEl("button", { text: "Save" });
-
-    cancel.onclick = () => this.close();
-    ok.onclick = () => {
-      const n = this.value.trim();
-      if (!n) { new Notice("Name cannot be empty.", 1500); return; }
-      this.close();
-      this.onOk(n);
-    };
-  }
-
-  onClose(): void { this.contentEl.empty(); }
+constructor(app: App, layer: MarkerLayer, onDone: (newName: string) => void) {
+super(app);
+this.layer = layer;
+this.onDone = onDone;
+this.value = layer.name ?? "";
 }
 
-export type DeleteLayerDecision =
-  | { mode: "move"; targetId: string }
-  | { mode: "delete-markers" };
+onOpen(): void {
+const { contentEl } = this;
+contentEl.empty();
+contentEl.createEl("h2", { text: "Rename layer" });
+
+new Setting(contentEl)
+  .setName("New name")
+  .addText((t) => {
+    t.setValue(this.value);
+    t.onChange((v) => (this.value = v.trim()));
+  });
+
+const footer = contentEl.createDiv({
+  attr: { style: "display:flex; gap:8px; justify-content:flex-end; margin-top:12px;" },
+});
+const save = footer.createEl("button", { text: "Save" });
+const cancel = footer.createEl("button", { text: "Cancel" });
+
+save.onclick = () => {
+  const name = this.value || this.layer.name;
+  this.close();
+  this.onDone(name);
+};
+cancel.onclick = () => this.close();
+}
+
+onClose(): void {
+this.contentEl.empty();
+}
+}
 
 export class DeleteLayerModal extends Modal {
-  private layer: MarkerLayer;
-  private others: MarkerLayer[];
-  private hasMarkers: boolean;
-  private onOk: (d: DeleteLayerDecision) => void;
+private layer: MarkerLayer;
+private targets: MarkerLayer[];
+private hasMarkers: boolean;
+private onDone: (decision: DeleteLayerDecision) => void;
 
-  private mode: "move" | "delete-markers" = "move";
-  private targetId: string;
+private mode: "delete-markers" | "move" = "delete-markers";
+private targetId = "";
 
-  constructor(
-    app: App,
-    layer: MarkerLayer,
-    others: MarkerLayer[],
-    hasMarkers: boolean,
-    onOk: (d: DeleteLayerDecision) => void,
-  ) {
-    super(app);
-    this.layer = layer;
-    this.others = others;
-    this.hasMarkers = hasMarkers;
-    this.targetId = others[0]?.id ?? "";
-    this.onOk = onOk;
+constructor(
+app: App,
+layer: MarkerLayer,
+targets: MarkerLayer[],
+hasMarkers: boolean,
+onDone: (decision: DeleteLayerDecision) => void,
+) {
+super(app);
+this.layer = layer;
+this.targets = targets;
+this.hasMarkers = hasMarkers;
+this.onDone = onDone;
+this.targetId = targets[0]?.id ?? "";
+}
+
+onOpen(): void {
+const { contentEl } = this;
+contentEl.empty();
+contentEl.createEl("h2", { text: "Delete layer" });
+
+// Aktion wählen
+const canMove = this.targets.length > 0;
+const actionSetting = new Setting(contentEl).setName("Action");
+
+actionSetting.addDropdown((d) => {
+  d.addOption("delete-markers", "Delete markers");
+  if (canMove) d.addOption("move", "Move to layer");
+  d.setValue(this.mode);
+  d.onChange((v) => {
+    this.mode = (v as "delete-markers" | "move");
+    targetSetting.settingEl.toggle(this.mode === "move");
+  });
+});
+
+// Ziel-Layer (nur sichtbar bei "Move")
+const targetSetting = new Setting(contentEl)
+  .setName("Target layer")
+  .addDropdown((d) => {
+    for (const t of this.targets) d.addOption(t.id, t.name);
+    d.setValue(this.targetId);
+    d.onChange((v) => (this.targetId = v));
+  });
+
+targetSetting.settingEl.toggle(this.mode === "move");
+
+if (!this.hasMarkers) {
+  // Hinweis, falls keine Marker existieren (dann ist „Delete markers“ folgenlos)
+  new Setting(contentEl).setDesc("This layer has no markers.");
+}
+if (!canMove) {
+  // Hinweis, falls es keinen anderen Ziel-Layer gibt
+  new Setting(contentEl).setDesc("No other layer available to move markers.");
+}
+
+const footer = contentEl.createDiv({
+  attr: { style: "display:flex; gap:8px; justify-content:flex-end; margin-top:12px;" },
+});
+const confirm = footer.createEl("button", { text: "Confirm" });
+const cancel = footer.createEl("button", { text: "Cancel" });
+
+confirm.onclick = () => {
+  if (this.mode === "move") {
+    // Fallback: wenn kein Ziel wählbar ist, breche ab
+    if (!this.targetId) { this.close(); return; }
+    this.close();
+    this.onDone({ mode: "move", targetId: this.targetId });
+  } else {
+    this.close();
+    this.onDone({ mode: "delete-markers" });
   }
+};
 
-  onOpen(): void {
-    const { contentEl } = this;
-    contentEl.empty();
-    contentEl.createEl("h2", { text: `Delete layer: ${this.layer.name}` });
+cancel.onclick = () => this.close();
+}
 
-    // Entscheidung: Marker verschieben oder löschen
-    const modeSetting = new Setting(contentEl)
-      .setName("What to do with markers?")
-      .setDesc(
-        this.hasMarkers ? "The layer contains markers." : "Layer has no markers.",
-      )
-      .addDropdown((d) => {
-        d.addOption("move", "Move to another layer");
-        d.addOption("delete-markers", "Delete markers");
-        d.setValue(this.mode);
-        d.onChange((v) => {
-          this.mode = (v as any) === "delete-markers" ? "delete-markers" : "move";
-          refresh();
-        });
-      });
-
-    // Ziel-Layer
-    const targetSetting = new Setting(contentEl)
-      .setName("Move target")
-      .setDesc("Destination layer for existing markers.");
-
-    targetSetting.addDropdown((d) => {
-      for (const l of this.others) d.addOption(l.id, l.name);
-      d.setValue(this.targetId);
-      d.onChange((v) => (this.targetId = v));
-    });
-
-    // Buttons
-    const footer = contentEl.createDiv({ cls: "modal-button-container" });
-    const cancelBtn = footer.createEl("button", { text: "Cancel" });
-    const okBtn = footer.createEl("button", { text: "Delete" });
-    okBtn.addClass("mod-warning");
-
-    cancelBtn.onclick = () => this.close();
-    okBtn.onclick = () => {
-      if (this.hasMarkers && this.mode === "move" && !this.targetId) {
-        new Notice("Please choose a target layer.", 1500);
-        return;
-      }
-      this.close();
-      const res: DeleteLayerDecision =
-        this.hasMarkers
-          ? this.mode === "move"
-            ? { mode: "move", targetId: this.targetId }
-            : { mode: "delete-markers" }
-          : { mode: "move", targetId: this.targetId || this.others[0]?.id || "" };
-      this.onOk(res);
-    };
-
-    // Sichtbarkeit der Zielauswahl steuern (ohne .toggle Fehler)
-    const refresh = () => {
-      const show = this.mode === "move" && this.hasMarkers;
-      (targetSetting.settingEl as HTMLElement).style.display = show ? "" : "none";
-    };
-    refresh();
-  }
-
-  onClose(): void { this.contentEl.empty(); }
+onClose(): void {
+this.contentEl.empty();
+}
 }

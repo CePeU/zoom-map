@@ -35,17 +35,17 @@ export class ScaleCalibrateModal extends Modal {
     new Setting(contentEl)
       .setName("Real world length")
       .addText((t) => {
-        t.setPlaceholder("example 2");
+        t.setPlaceholder("Example 2");
         t.setValue(this.inputValue);
         t.onChange((v) => {
           this.inputValue = v.trim();
         });
       })
       .addDropdown((d) => {
-        d.addOption("m", "m");
-        d.addOption("km", "km");
-        d.addOption("mi", "mi");
-        d.addOption("ft", "ft");
+        d.addOption("m", "Meters");
+        d.addOption("km", "Kilometers");
+        d.addOption("mi", "Miles");
+        d.addOption("ft", "Feet");
         d.setValue(this.unit);
         d.onChange((v) => {
           this.unit = v as ScaleUnit;
