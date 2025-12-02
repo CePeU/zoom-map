@@ -30,9 +30,7 @@ export class RenameLayerModal extends Modal {
         t.onChange((v) => (this.value = v.trim()));
       });
 
-    const footer = contentEl.createDiv({
-      attr: { style: "display:flex; gap:8px; justify-content:flex-end; margin-top:12px;" },
-    });
+    const footer = contentEl.createDiv({ cls: "zoommap-modal-footer" });
     const save = footer.createEl("button", { text: "Save" });
     const cancel = footer.createEl("button", { text: "Cancel" });
 
@@ -108,9 +106,7 @@ export class DeleteLayerModal extends Modal {
       new Setting(contentEl).setDesc("No other layer available to move markers.");
     }
 
-    const footer = contentEl.createDiv({
-      attr: { style: "display:flex; gap:8px; justify-content:flex-end; margin-top:12px;" },
-    });
+    const footer = contentEl.createDiv({ cls: "zoommap-modal-footer" });
     const confirm = footer.createEl("button", { text: "Confirm" });
     const cancel = footer.createEl("button", { text: "Cancel" });
 

@@ -133,29 +133,33 @@ export class MarkerEditorModal extends Modal {
 
     // Icon or Sticker size
     if (this.marker.type === "sticker") {
-      new Setting(contentEl).setName("Size").addText((t) => {
-        t.setPlaceholder("64");
-        t.setValue(String(this.marker.stickerSize ?? 64));
-        t.onChange((v) => {
-          const n = Number(v);
-          if (Number.isFinite(n) && n > 0) this.marker.stickerSize = Math.round(n);
-        });
-      });
-    } else {
-      new Setting(contentEl)
-        .setName("Icon")
-        .setDesc("To set up new go to settings.")
-        .addDropdown((d) => {
-          for (const icon of this.plugin.settings.icons) d.addOption(icon.key, icon.key);
-          d.setValue(this.marker.iconKey ?? this.plugin.settings.defaultIconKey);
-          d.onChange((v) => { this.marker.iconKey = v; });
-        });
-    }
+	  new Setting(contentEl).setName("Size").addText((t) => {
+		t.setPlaceholder("64");
+		t.setValue(String(this.marker.stickerSize ?? 64));
+		t.onChange((v) => {
+		  const n = Number(v);
+		  if (Number.isFinite(n) && n > 0) {
+			this.marker.stickerSize = Math.round(n);
+			updatePreview(); // OPTIONAL: auch bei Größenänderung aktualisieren
+		  }
+		});
+	  });
+	} else {
+	  new Setting(contentEl)
+		.setName("Icon")
+		.setDesc("To set up new go to settings.")
+		.addDropdown((d) => {
+		  for (const icon of this.plugin.settings.icons) d.addOption(icon.key, icon.key);
+		  d.setValue(this.marker.iconKey ?? this.plugin.settings.defaultIconKey);
+		  d.onChange((v) => {
+			this.marker.iconKey = v;
+			updatePreview(); // WICHTIG: Vorschau neu laden
+		  });
+		});
+	}
 
     // Preview
-    const preview = contentEl.createDiv({
-      attr: { style: "margin-top:8px; display:flex; align-items:center; gap:8px; flex-wrap:wrap;" },
-    });
+    const preview = contentEl.createDiv({ cls: "zoommap-modal-preview" });
     preview.createSpan({ text: "Preview:" });
     const img = preview.createEl("img");
 
@@ -190,9 +194,7 @@ export class MarkerEditorModal extends Modal {
     updatePreview();
 
     // Footer
-    const footer = contentEl.createDiv({
-      attr: { style: "display:flex; gap:8px; justify-content:flex-end; margin-top:12px; flex-wrap:wrap;" },
-    });
+    const footer = contentEl.createDiv({ cls: "zoommap-modal-footer" });
     const btnSave = footer.createEl("button", { text: "Save" });
     const btnDelete = footer.createEl("button", { text: this.marker.type === "sticker" ? "Delete sticker" : "Delete marker" });
     const btnCancel = footer.createEl("button", { text: "Cancel" });

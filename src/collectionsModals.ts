@@ -59,12 +59,7 @@ export class CollectionEditorModal extends Modal {
         pathsWrap.createEl("div", { text: "No base images bound." });
       } else {
         this.working.bindings.basePaths.forEach((p, idx) => {
-          const row = pathsWrap.createDiv({
-            attr: {
-              style:
-                "display:flex; align-items:center; gap:8px; margin:4px 0; border:1px solid var(--background-modifier-border); border-radius:6px; padding:4px 6px; overflow:auto;",
-            },
-          });
+          const row = pathsWrap.createDiv({ cls: "zoommap-collection-base-row" });
           const code = row.createEl("code", { text: p });
           code.style.whiteSpace = "pre-wrap";
           code.style.wordBreak = "break-word";
@@ -108,19 +103,9 @@ export class CollectionEditorModal extends Modal {
           attr: { style: "color: var(--text-muted);" },
         });
       } else {
-        const list = pinWrap.createDiv({
-          attr: {
-            style:
-              "display:grid; grid-template-columns: repeat(auto-fill, minmax(220px,1fr)); gap:8px; margin-bottom:6px;",
-          },
-        });
+        const list = pinWrap.createDiv({ cls: "zoommap-collection-pin-grid" });
         lib.forEach((ico) => {
-          const cell = list.createDiv({
-            attr: {
-              style:
-                "display:flex; align-items:center; gap:8px; padding:6px; border:1px solid var(--background-modifier-border); border-radius:6px; min-width:0;",
-            },
-          });
+          const cell = list.createDiv({ cls: "zoommap-collection-pin-cell" });
 
           // Checkbox
           const cb = cell.createEl("input", { type: "checkbox" });
@@ -178,12 +163,7 @@ export class CollectionEditorModal extends Modal {
         });
       }
       list.forEach((p, idx) => {
-        const row = favWrap.createDiv({
-          attr: {
-            style:
-              "display:grid; grid-template-columns: 14ch 12ch 12ch 8ch minmax(18ch,1fr) auto; gap:6px; align-items:center; margin:6px 0;",
-          },
-        });
+        const row = favWrap.createDiv({ cls: "zoommap-collection-fav-row" });
         // Name
         const name = row.createEl("input", { type: "text" });
         name.value = p.name ?? "";
@@ -249,12 +229,7 @@ export class CollectionEditorModal extends Modal {
         });
       }
       list.forEach((s, idx) => {
-        const row = stickerWrap.createDiv({
-          attr: {
-            style:
-              "display:grid; grid-template-columns: 14ch minmax(20ch,1fr) 8ch 12ch auto; gap:6px; align-items:center; margin:6px 0;",
-          },
-        });
+        const row = stickerWrap.createDiv({ cls: "zoommap-collection-sticker-row" });
         const name = row.createEl("input", { type: "text" });
         name.value = s.name ?? "";
         name.oninput = () => (s.name = name.value.trim());
@@ -303,9 +278,7 @@ export class CollectionEditorModal extends Modal {
     renderStickers();
 
     // Footer
-    const footer = contentEl.createDiv({
-      attr: { style: "display:flex; gap:8px; justify-content:flex-end; margin-top:14px;" },
-    });
+    const footer = contentEl.createDiv({ cls: "zoommap-modal-footer" });
 
     const save = footer.createEl("button", { text: "Save" });
     save.onclick = async () => {

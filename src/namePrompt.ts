@@ -26,7 +26,7 @@ export class NamePromptModal extends Modal {
         t.onChange((v) => (this.value = v));
       });
 
-    const footer = contentEl.createDiv({ attr: { style: "display:flex; gap:8px; justify-content:flex-end; margin-top:12px;" } });
+    const footer = contentEl.createDiv({ cls: "zoommap-modal-footer" });
     const ok = footer.createEl("button", { text: "Save" });
     const cancel = footer.createEl("button", { text: "Skip" });
 

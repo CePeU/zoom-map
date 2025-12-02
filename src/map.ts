@@ -462,15 +462,25 @@ export class MapInstance extends Component {
     this.overlayLoading.clear();
   }
 
-  private async loadBitmapFromPath(path: string): Promise<ImageBitmap | null> {
-    const f = this.resolveTFile(path, this.cfg.sourcePath);
+ private async loadBitmapFromPath(path: string): Promise<ImageBitmap | null> {
+  const f = this.resolveTFile(path, this.cfg.sourcePath);
     if (!f) return null;
+
     const url = this.app.vault.getResourcePath(f);
     const img = new Image();
     img.decoding = "async";
     img.src = url;
-    try { await img.decode(); } catch (err) { console.warn("Zoom Map: decode warning", err); }
-    try { return await createImageBitmap(img); } catch (error) { console.warn("Zoom Map: createImageBitmap failed", error); return null; }
+
+    try {
+      await img.decode();
+	} catch { //empty.
+	}
+
+    try {
+	  return await createImageBitmap(img);
+	} catch {
+        return null;
+	}
   }
 
   private async loadBaseBitmapByPath(path: string): Promise<void> {
@@ -507,12 +517,22 @@ export class MapInstance extends Component {
   private async loadCanvasSourceFromPath(path: string): Promise<CanvasImageSource | null> {
     const f = this.resolveTFile(path, this.cfg.sourcePath);
     if (!f) return null;
+
     const url = this.app.vault.getResourcePath(f);
     const img = new Image();
     img.decoding = "async";
     img.src = url;
-    try { await img.decode(); } catch (error) { console.warn("Zoom Map: overlay decode warning", error); }
-    try { return await createImageBitmap(img); } catch { return img; }
+
+    try {
+      await img.decode();
+	} catch { //empty.
+	}
+
+    try {
+      return await createImageBitmap(img);
+	} catch {
+       return img;
+	}
   }
 
   private closeCanvasSource(src: CanvasImageSource | null): void {
@@ -1286,19 +1306,19 @@ export class MapInstance extends Component {
     ];
     if (pinsBaseMenu.length) {
       addHereChildren.push({ type: "separator" });
-      addHereChildren.push({ label: "Pins (Base)", children: pinsBaseMenu });
+      addHereChildren.push({ label: "Pins (base)", children: pinsBaseMenu });
     }
-    if (pinsGlobalMenu.length) addHereChildren.push({ label: "Pins (Global)", children: pinsGlobalMenu });
+    if (pinsGlobalMenu.length) addHereChildren.push({ label: "Pins (global)", children: pinsGlobalMenu });
     if (favsBaseMenu.length) {
       addHereChildren.push({ type: "separator" });
-      addHereChildren.push({ label: "Favorites (Base)", children: favsBaseMenu });
+      addHereChildren.push({ label: "Favorites (base)", children: favsBaseMenu });
     }
-    if (favsGlobalMenu.length) addHereChildren.push({ label: "Favorites (Global)", children: favsGlobalMenu });
+    if (favsGlobalMenu.length) addHereChildren.push({ label: "Favorites (global)", children: favsGlobalMenu });
     if (stickersBaseMenu.length) {
       addHereChildren.push({ type: "separator" });
-      addHereChildren.push({ label: "Stickers (Base)", children: stickersBaseMenu });
+      addHereChildren.push({ label: "Stickers (base)", children: stickersBaseMenu });
     }
-    if (stickersGlobalMenu.length) addHereChildren.push({ label: "Stickers (Global)", children: stickersGlobalMenu });
+    if (stickersGlobalMenu.length) addHereChildren.push({ label: "Stickers (global)", children: stickersGlobalMenu });
 
     const items: ZMMenuItem[] = [{ label: "Add marker here", children: addHereChildren }];
 
@@ -2444,34 +2464,45 @@ export class MapInstance extends Component {
   }
 
   private async updateYamlList(
-    key: "imageBases" | "imageOverlays",
-    newPath: string,
-    opts?: { name?: string },
-  ): Promise<boolean> {
+  key: "imageBases" | "imageOverlays",
+  newPath: string,
+  opts?: { name?: string },
+): Promise<boolean> {
     if (typeof this.cfg.sectionStart !== "number" || typeof this.cfg.sectionEnd !== "number") return false;
     const af = this.app.vault.getAbstractFileByPath(this.cfg.sourcePath);
     if (!(af instanceof TFile)) return false;
 
-    const text = await this.app.vault.read(af);
+    let foundBlock = false;
+    let changedText = false;
+
+  await this.app.vault.process(af, (text) => {
     const lines = text.split("\n");
     const blk = this.findZoommapBlock(lines, this.cfg.sectionStart);
-    if (!blk) return false;
+    if (!blk) return text;
+
+    foundBlock = true;
 
     const content = lines.slice(blk.start + 1, blk.end);
     const patched = this.patchYamlList(content, key, newPath, opts);
-    if (!patched.changed) return true;
+    if (!patched.changed) return text;
 
-    const out = [
+    changedText = true;
+    if (af.path === this.store.getPath()) {
+      this.ignoreNextModify = true;
+    }
+
+    return [
       ...lines.slice(0, blk.start + 1),
       ...patched.out,
       ...lines.slice(blk.end),
     ].join("\n");
+  });
 
-    if (af.path === this.store.getPath()) this.ignoreNextModify = true;
-
-    await this.app.vault.modify(af, out);
-    return true;
-  }
+  // Semantik wie vorher:
+  // true = Block gefunden (auch wenn nichts geändert wurde)
+  // false = Block nicht gefunden
+  return foundBlock;
+}
 
   private findZoommapBlock(
     lines: string[],

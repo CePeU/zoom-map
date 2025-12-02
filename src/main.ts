@@ -641,12 +641,7 @@ class ZoomMapSettingTab extends PluginSettingTab {
         list.createEl("div", { text: "No collections yet." });
       } else {
         cols.forEach((c) => {
-          const row = list.createDiv({
-            attr: {
-              style:
-                "display:grid; grid-template-columns: 1fr auto auto; gap:8px; align-items:center; padding:6px 0; border-bottom: 1px solid var(--background-modifier-border);",
-            },
-          });
+          const row = list.createDiv({ cls: "zoommap-collections-row" });
           const left = row.createDiv();
           const name = left.createEl("div", { text: c.name || "(unnamed collection)" });
           name.style.fontWeight = "600";
@@ -685,9 +680,7 @@ class ZoomMapSettingTab extends PluginSettingTab {
         });
       }
 
-      const actions = collectionsWrap.createDiv({
-        attr: { style: "display:flex; gap:8px; margin-top:10px;" },
-      });
+      const actions = collectionsWrap.createDiv({ cls: "zoommap-collections-actions" });
       const add = actions.createEl("button", { text: "Add collection" });
       add.onclick = () => {
         const fresh: BaseCollection = {

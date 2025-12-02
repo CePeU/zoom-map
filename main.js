@@ -241,7 +241,10 @@ var MarkerEditorModal = class extends import_obsidian2.Modal {
         t.setValue(String((_a = this.marker.stickerSize) != null ? _a : 64));
         t.onChange((v) => {
           const n = Number(v);
-          if (Number.isFinite(n) && n > 0) this.marker.stickerSize = Math.round(n);
+          if (Number.isFinite(n) && n > 0) {
+            this.marker.stickerSize = Math.round(n);
+            updatePreview();
+          }
         });
       });
     } else {
@@ -251,12 +254,11 @@ var MarkerEditorModal = class extends import_obsidian2.Modal {
         d.setValue((_a = this.marker.iconKey) != null ? _a : this.plugin.settings.defaultIconKey);
         d.onChange((v) => {
           this.marker.iconKey = v;
+          updatePreview();
         });
       });
     }
-    const preview = contentEl.createDiv({
-      attr: { style: "margin-top:8px; display:flex; align-items:center; gap:8px; flex-wrap:wrap;" }
-    });
+    const preview = contentEl.createDiv({ cls: "zoommap-modal-preview" });
     preview.createSpan({ text: "Preview:" });
     const img = preview.createEl("img");
     const resolvePreview = () => {
@@ -288,9 +290,7 @@ var MarkerEditorModal = class extends import_obsidian2.Modal {
       img.style.height = `${size}px`;
     };
     updatePreview();
-    const footer = contentEl.createDiv({
-      attr: { style: "display:flex; gap:8px; justify-content:flex-end; margin-top:12px; flex-wrap:wrap;" }
-    });
+    const footer = contentEl.createDiv({ cls: "zoommap-modal-footer" });
     const btnSave = footer.createEl("button", { text: "Save" });
     const btnDelete = footer.createEl("button", { text: this.marker.type === "sticker" ? "Delete sticker" : "Delete marker" });
     const btnCancel = footer.createEl("button", { text: "Cancel" });
@@ -358,9 +358,7 @@ var ScaleCalibrateModal = class extends import_obsidian3.Modal {
         this.unit = v;
       });
     });
-    const footer = contentEl.createDiv({
-      attr: { style: "display:flex; gap:8px; justify-content:flex-end; margin-top:12px;" }
-    });
+    const footer = contentEl.createDiv({ cls: "zoommap-modal-footer" });
     const ok = footer.createEl("button", { text: "Save" });
     const cancel = footer.createEl("button", { text: "Cancel" });
     ok.addEventListener("click", () => {
@@ -435,8 +433,7 @@ var NoteMarkerStore = class {
     return { start: headerLineStart, end: endExclusive, jsonStart, jsonEnd: Math.max(jsonStart, jsonEnd) };
   }
   async ensureExists(initialImagePath, size) {
-    const { file, text } = await this.readNote();
-    if (this.findBlock(text)) return;
+    const { file } = await this.readNote();
     const data = {
       image: initialImagePath != null ? initialImagePath : "",
       size,
@@ -449,21 +446,25 @@ var NoteMarkerStore = class {
       frame: void 0
     };
     const payload = JSON.stringify(data, null, 2);
+    const header = this.headerLine();
+    const footer = this.footerLine();
     const block = `
 %%
-${this.headerLine()}
+${header}
 ${payload}
-${this.footerLine()}
+${footer}
 %%
 `;
-    let insertAt = text.length;
-    if (typeof this.insertAfterLine === "number") {
-      const lines = text.split("\n");
-      const before = lines.slice(0, this.insertAfterLine + 1).join("\n");
-      insertAt = before.length;
-    }
-    const out = text.slice(0, insertAt) + block + text.slice(insertAt);
-    await this.app.vault.modify(file, out);
+    await this.app.vault.process(file, (text) => {
+      if (this.findBlock(text)) return text;
+      let insertAt = text.length;
+      if (typeof this.insertAfterLine === "number") {
+        const lines = text.split("\n");
+        const before = lines.slice(0, this.insertAfterLine + 1).join("\n");
+        insertAt = before.length;
+      }
+      return text.slice(0, insertAt) + block + text.slice(insertAt);
+    });
   }
   async load() {
     const { text } = await this.readNote();
@@ -473,26 +474,28 @@ ${this.footerLine()}
     return JSON.parse(raw);
   }
   async save(data) {
-    const { file, text } = await this.readNote();
-    const blk = this.findBlock(text);
+    const { file } = await this.readNote();
+    const header = this.headerLine();
+    const footer = this.footerLine();
     const payload = JSON.stringify(data, null, 2);
-    const replacement = `${this.headerLine()}
+    await this.app.vault.process(file, (text) => {
+      const blk = this.findBlock(text);
+      const replacement = `${header}
 ${payload}
-${this.footerLine()}
+${footer}
 `;
-    let out;
-    if (blk) {
-      out = text.slice(0, blk.start) + replacement + text.slice(blk.end);
-    } else {
-      out = text + `
+      if (blk) {
+        return text.slice(0, blk.start) + replacement + text.slice(blk.end);
+      } else {
+        return text + `
 %%
-${this.headerLine()}
+${header}
 ${payload}
-${this.footerLine()}
+${footer}
 %%
 `;
-    }
-    await this.app.vault.modify(file, out);
+      }
+    });
   }
   async wouldChange(data) {
     try {
@@ -550,7 +553,7 @@ var NamePromptModal = class extends import_obsidian6.Modal {
       t.setValue(this.value);
       t.onChange((v) => this.value = v);
     });
-    const footer = contentEl.createDiv({ attr: { style: "display:flex; gap:8px; justify-content:flex-end; margin-top:12px;" } });
+    const footer = contentEl.createDiv({ cls: "zoommap-modal-footer" });
     const ok = footer.createEl("button", { text: "Save" });
     const cancel = footer.createEl("button", { text: "Skip" });
     ok.onclick = () => {
@@ -586,9 +589,7 @@ var RenameLayerModal = class extends import_obsidian7.Modal {
       t.setValue(this.value);
       t.onChange((v) => this.value = v.trim());
     });
-    const footer = contentEl.createDiv({
-      attr: { style: "display:flex; gap:8px; justify-content:flex-end; margin-top:12px;" }
-    });
+    const footer = contentEl.createDiv({ cls: "zoommap-modal-footer" });
     const save = footer.createEl("button", { text: "Save" });
     const cancel = footer.createEl("button", { text: "Cancel" });
     save.onclick = () => {
@@ -641,9 +642,7 @@ var DeleteLayerModal = class extends import_obsidian7.Modal {
     if (!canMove) {
       new import_obsidian7.Setting(contentEl).setDesc("No other layer available to move markers.");
     }
-    const footer = contentEl.createDiv({
-      attr: { style: "display:flex; gap:8px; justify-content:flex-end; margin-top:12px;" }
-    });
+    const footer = contentEl.createDiv({ cls: "zoommap-modal-footer" });
     const confirm = footer.createEl("button", { text: "Confirm" });
     const cancel = footer.createEl("button", { text: "Cancel" });
     confirm.onclick = () => {
@@ -972,13 +971,11 @@ var MapInstance = class extends import_obsidian8.Component {
     img.src = url;
     try {
       await img.decode();
-    } catch (err) {
-      console.warn("Zoom Map: decode warning", err);
+    } catch (e) {
     }
     try {
       return await createImageBitmap(img);
-    } catch (error) {
-      console.warn("Zoom Map: createImageBitmap failed", error);
+    } catch (e) {
       return null;
     }
   }
@@ -1023,8 +1020,7 @@ var MapInstance = class extends import_obsidian8.Component {
     img.src = url;
     try {
       await img.decode();
-    } catch (error) {
-      console.warn("Zoom Map: overlay decode warning", error);
+    } catch (e) {
     }
     try {
       return await createImageBitmap(img);
@@ -1737,19 +1733,19 @@ var MapInstance = class extends import_obsidian8.Component {
     ];
     if (pinsBaseMenu.length) {
       addHereChildren.push({ type: "separator" });
-      addHereChildren.push({ label: "Pins (Base)", children: pinsBaseMenu });
+      addHereChildren.push({ label: "Pins (base)", children: pinsBaseMenu });
     }
-    if (pinsGlobalMenu.length) addHereChildren.push({ label: "Pins (Global)", children: pinsGlobalMenu });
+    if (pinsGlobalMenu.length) addHereChildren.push({ label: "Pins (global)", children: pinsGlobalMenu });
     if (favsBaseMenu.length) {
       addHereChildren.push({ type: "separator" });
-      addHereChildren.push({ label: "Favorites (Base)", children: favsBaseMenu });
+      addHereChildren.push({ label: "Favorites (base)", children: favsBaseMenu });
     }
-    if (favsGlobalMenu.length) addHereChildren.push({ label: "Favorites (Global)", children: favsGlobalMenu });
+    if (favsGlobalMenu.length) addHereChildren.push({ label: "Favorites (global)", children: favsGlobalMenu });
     if (stickersBaseMenu.length) {
       addHereChildren.push({ type: "separator" });
-      addHereChildren.push({ label: "Stickers (Base)", children: stickersBaseMenu });
+      addHereChildren.push({ label: "Stickers (base)", children: stickersBaseMenu });
     }
-    if (stickersGlobalMenu.length) addHereChildren.push({ label: "Stickers (Global)", children: stickersGlobalMenu });
+    if (stickersGlobalMenu.length) addHereChildren.push({ label: "Stickers (global)", children: stickersGlobalMenu });
     const items = [{ label: "Add marker here", children: addHereChildren }];
     const layerChildren = this.data.layers.map((layer) => {
       const state = this.getLayerState(layer);
@@ -2791,21 +2787,27 @@ var MapInstance = class extends import_obsidian8.Component {
     if (typeof this.cfg.sectionStart !== "number" || typeof this.cfg.sectionEnd !== "number") return false;
     const af = this.app.vault.getAbstractFileByPath(this.cfg.sourcePath);
     if (!(af instanceof import_obsidian8.TFile)) return false;
-    const text = await this.app.vault.read(af);
-    const lines = text.split("\n");
-    const blk = this.findZoommapBlock(lines, this.cfg.sectionStart);
-    if (!blk) return false;
-    const content = lines.slice(blk.start + 1, blk.end);
-    const patched = this.patchYamlList(content, key, newPath, opts);
-    if (!patched.changed) return true;
-    const out = [
-      ...lines.slice(0, blk.start + 1),
-      ...patched.out,
-      ...lines.slice(blk.end)
-    ].join("\n");
-    if (af.path === this.store.getPath()) this.ignoreNextModify = true;
-    await this.app.vault.modify(af, out);
-    return true;
+    let foundBlock = false;
+    let changedText = false;
+    await this.app.vault.process(af, (text) => {
+      const lines = text.split("\n");
+      const blk = this.findZoommapBlock(lines, this.cfg.sectionStart);
+      if (!blk) return text;
+      foundBlock = true;
+      const content = lines.slice(blk.start + 1, blk.end);
+      const patched = this.patchYamlList(content, key, newPath, opts);
+      if (!patched.changed) return text;
+      changedText = true;
+      if (af.path === this.store.getPath()) {
+        this.ignoreNextModify = true;
+      }
+      return [
+        ...lines.slice(0, blk.start + 1),
+        ...patched.out,
+        ...lines.slice(blk.end)
+      ].join("\n");
+    });
+    return foundBlock;
   }
   findZoommapBlock(lines, approxLine) {
     let result = null;
@@ -3065,11 +3067,7 @@ var CollectionEditorModal = class extends import_obsidian9.Modal {
         pathsWrap.createEl("div", { text: "No base images bound." });
       } else {
         this.working.bindings.basePaths.forEach((p, idx) => {
-          const row = pathsWrap.createDiv({
-            attr: {
-              style: "display:flex; align-items:center; gap:8px; margin:4px 0; border:1px solid var(--background-modifier-border); border-radius:6px; padding:4px 6px; overflow:auto;"
-            }
-          });
+          const row = pathsWrap.createDiv({ cls: "zoommap-collection-base-row" });
           const code = row.createEl("code", { text: p });
           code.style.whiteSpace = "pre-wrap";
           code.style.wordBreak = "break-word";
@@ -3109,18 +3107,10 @@ var CollectionEditorModal = class extends import_obsidian9.Modal {
           attr: { style: "color: var(--text-muted);" }
         });
       } else {
-        const list = pinWrap.createDiv({
-          attr: {
-            style: "display:grid; grid-template-columns: repeat(auto-fill, minmax(220px,1fr)); gap:8px; margin-bottom:6px;"
-          }
-        });
+        const list = pinWrap.createDiv({ cls: "zoommap-collection-pin-grid" });
         lib.forEach((ico) => {
           var _a2;
-          const cell = list.createDiv({
-            attr: {
-              style: "display:flex; align-items:center; gap:8px; padding:6px; border:1px solid var(--background-modifier-border); border-radius:6px; min-width:0;"
-            }
-          });
+          const cell = list.createDiv({ cls: "zoommap-collection-pin-cell" });
           const cb = cell.createEl("input", { type: "checkbox" });
           cb.checked = this.working.include.pinKeys.includes(ico.key);
           cb.onchange = () => {
@@ -3169,11 +3159,7 @@ var CollectionEditorModal = class extends import_obsidian9.Modal {
       }
       list.forEach((p, idx) => {
         var _a, _b, _c, _d, _e;
-        const row = favWrap.createDiv({
-          attr: {
-            style: "display:grid; grid-template-columns: 14ch 12ch 12ch 8ch minmax(18ch,1fr) auto; gap:6px; align-items:center; margin:6px 0;"
-          }
-        });
+        const row = favWrap.createDiv({ cls: "zoommap-collection-fav-row" });
         const name = row.createEl("input", { type: "text" });
         name.value = (_a = p.name) != null ? _a : "";
         name.oninput = () => p.name = name.value.trim();
@@ -3226,11 +3212,7 @@ var CollectionEditorModal = class extends import_obsidian9.Modal {
       }
       list.forEach((s, idx) => {
         var _a, _b, _c, _d;
-        const row = stickerWrap.createDiv({
-          attr: {
-            style: "display:grid; grid-template-columns: 14ch minmax(20ch,1fr) 8ch 12ch auto; gap:6px; align-items:center; margin:6px 0;"
-          }
-        });
+        const row = stickerWrap.createDiv({ cls: "zoommap-collection-sticker-row" });
         const name = row.createEl("input", { type: "text" });
         name.value = (_a = s.name) != null ? _a : "";
         name.oninput = () => s.name = name.value.trim();
@@ -3271,9 +3253,7 @@ var CollectionEditorModal = class extends import_obsidian9.Modal {
       };
     };
     renderStickers();
-    const footer = contentEl.createDiv({
-      attr: { style: "display:flex; gap:8px; justify-content:flex-end; margin-top:14px;" }
-    });
+    const footer = contentEl.createDiv({ cls: "zoommap-modal-footer" });
     const save = footer.createEl("button", { text: "Save" });
     save.onclick = async () => {
       this.original.name = this.working.name;
@@ -3770,11 +3750,7 @@ var ZoomMapSettingTab = class extends import_obsidian11.PluginSettingTab {
       } else {
         cols.forEach((c) => {
           var _a3, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l;
-          const row = list.createDiv({
-            attr: {
-              style: "display:grid; grid-template-columns: 1fr auto auto; gap:8px; align-items:center; padding:6px 0; border-bottom: 1px solid var(--background-modifier-border);"
-            }
-          });
+          const row = list.createDiv({ cls: "zoommap-collections-row" });
           const left = row.createDiv();
           const name = left.createEl("div", { text: c.name || "(unnamed collection)" });
           name.style.fontWeight = "600";
@@ -3812,9 +3788,7 @@ var ZoomMapSettingTab = class extends import_obsidian11.PluginSettingTab {
           };
         });
       }
-      const actions = collectionsWrap.createDiv({
-        attr: { style: "display:flex; gap:8px; margin-top:10px;" }
-      });
+      const actions = collectionsWrap.createDiv({ cls: "zoommap-collections-actions" });
       const add = actions.createEl("button", { text: "Add collection" });
       add.onclick = () => {
         const fresh = {

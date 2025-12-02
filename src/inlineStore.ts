@@ -68,8 +68,7 @@ export class NoteMarkerStore {
   }
 
   async ensureExists(initialImagePath?: string, size?: { w: number; h: number }): Promise<void> {
-    const { file, text } = await this.readNote();
-    if (this.findBlock(text)) return;
+    const { file } = await this.readNote();
 
     const data: MarkerFileData = {
       image: initialImagePath ?? "",
@@ -83,9 +82,15 @@ export class NoteMarkerStore {
       frame: undefined,
     };
 
-    const payload = JSON.stringify(data, null, 2);
+	const payload = JSON.stringify(data, null, 2);
+    const header = this.headerLine();
+    const footer = this.footerLine();
     const block =
-`\n%%\n${this.headerLine()}\n${payload}\n${this.footerLine()}\n%%\n`;
+	`\n%%\n${header}\n${payload}\n${footer}\n%%\n`;
+
+  await this.app.vault.process(file, (text) => {
+    // Wenn schon ein Block existiert, nichts tun
+    if (this.findBlock(text)) return text;
 
     let insertAt = text.length;
     if (typeof this.insertAfterLine === "number") {
@@ -93,8 +98,8 @@ export class NoteMarkerStore {
       const before = lines.slice(0, this.insertAfterLine + 1).join("\n");
       insertAt = before.length;
     }
-    const out = text.slice(0, insertAt) + block + text.slice(insertAt);
-    await this.app.vault.modify(file, out);
+    return text.slice(0, insertAt) + block + text.slice(insertAt);
+  });
   }
 
   async load(): Promise<MarkerFileData> {
@@ -106,21 +111,23 @@ export class NoteMarkerStore {
   }
 
   async save(data: MarkerFileData): Promise<void> {
-    const { file, text } = await this.readNote();
-    const blk = this.findBlock(text);
+    const { file } = await this.readNote();
+    const header = this.headerLine();
+    const footer = this.footerLine();
     const payload = JSON.stringify(data, null, 2);
 
+     await this.app.vault.process(file, (text) => {
+    const blk = this.findBlock(text);
     const replacement =
-`${this.headerLine()}\n${payload}\n${this.footerLine()}\n`;
+	`${header}\n${payload}\n${footer}\n`;
 
-    let out: string;
     if (blk) {
-      out = text.slice(0, blk.start) + replacement + text.slice(blk.end);
+      return text.slice(0, blk.start) + replacement + text.slice(blk.end);
     } else {
-      out = text +
-`\n%%\n${this.headerLine()}\n${payload}\n${this.footerLine()}\n%%\n`;
+      return text +
+	`\n%%\n${header}\n${payload}\n${footer}\n%%\n`;
     }
-    await this.app.vault.modify(file, out);
+  });
   }
 
   async wouldChange(data: MarkerFileData): Promise<boolean> {

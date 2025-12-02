@@ -486,6 +486,84 @@ body.is-tablet .zoommap-settings .zm-icon-btn svg {
   height: 20px !important;
 }
 
+/* Generic modal layouts (used in editor & other modals) */
+.zoommap-modal-preview {
+  margin-top: 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.zoommap-modal-footer {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 12px;
+  flex-wrap: wrap;
+}
+
+/* Settings: collections list rows + actions */
+.zoommap-collections-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 8px;
+  align-items: center;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.zoommap-collections-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+/* Collections editor modals */
+.zoommap-collection-base-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 0;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  padding: 4px 6px;
+  overflow: auto;
+}
+
+.zoommap-collection-pin-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.zoommap-collection-pin-cell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  min-width: 0;
+}
+
+.zoommap-collection-fav-row {
+  display: grid;
+  grid-template-columns: 14ch 12ch 12ch 8ch minmax(18ch, 1fr) auto;
+  gap: 6px;
+  align-items: center;
+  margin: 6px 0;
+}
+
+.zoommap-collection-sticker-row {
+  display: grid;
+  grid-template-columns: 14ch minmax(20ch, 1fr) 8ch 12ch auto;
+  gap: 6px;
+  align-items: center;
+  margin: 6px 0;
+}
+
 /* Cursor helper classes on body */
 body.zm-cursor-grabbing {
   cursor: grabbing;
