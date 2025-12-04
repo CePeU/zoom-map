@@ -548,11 +548,19 @@ body.is-tablet .zoommap-settings .zm-icon-btn svg {
   padding: 4px 6px;
   font-size: 12px;
   cursor: pointer;
+  background: var(--background-primary);
+  color: var(--text-normal);
 }
 
-.zoommap-link-suggestion-item.is-selected,
+/* Hover: leicht hervorgehoben */
 .zoommap-link-suggestion-item:hover {
   background: var(--background-modifier-hover);
+}
+
+/* Tastatur-Auswahl: klarer Balken */
+.zoommap-link-suggestion-item.is-selected {
+  background: var(--interactive-accent);
+  color: var(--text-on-accent, #fff);
 }
 
 /* Settings: collections list rows + actions */
