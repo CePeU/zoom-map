@@ -141,6 +141,26 @@ function isImageBitmapLike(x: unknown): x is ImageBitmap {
   return typeof x === "object" && x !== null && "close" in x && typeof (x as { close: unknown }).close === "function";
 }
 
+function isSvgDataUrl(src: string): boolean {
+  return typeof src === "string" && src.startsWith("data:image/svg+xml");
+}
+
+function tintSvgMarkupLocal(svg: string, color: string): string {
+  const c = color.trim();
+  if (!c) return svg;
+
+  let s = svg;
+
+  s = s.replace(/fill="[^"]*"/gi, `fill="${c}"`);
+  s = s.replace(/stroke="[^"]*"/gi, `stroke="${c}"`);
+
+  if (!/fill="/i.test(s)) {
+    s = s.replace(/<svg([^>]*?)>/i, `<svg$1 fill="${c}">`);
+  }
+
+  return s;
+}
+
 /* Per-marker option accessors (typed; avoid any) */
 function getMinZoom(m: Marker): number | undefined { return m.minZoom; }
 function getMaxZoom(m: Marker): number | undefined { return m.maxZoom; }
@@ -238,6 +258,8 @@ export class MapInstance extends Component {
   private userResizing = false;
 
   private yamlAppliedOnce = false;
+  
+  private tintedSvgCache: Map<string, string> = new Map<string, string>();
 
   constructor(app: App, plugin: ZoomMapPlugin, el: HTMLElement, cfg: ZoomMapConfig) {
     super();
@@ -270,6 +292,7 @@ export class MapInstance extends Component {
       window.clearTimeout(this.zoomHudTimer);
       this.zoomHudTimer = null;
     }
+    this.tintedSvgCache.clear();
     this.tooltipEl?.remove();
     this.ro?.disconnect();
     this.closeMenu();
@@ -2243,7 +2266,30 @@ private onContextMenuViewport(e: MouseEvent): void {
 
     modal.open();
   }
+  
+  private getTintedSvgDataUrl(baseDataUrl: string, color: string): string {
+    const key = `${baseDataUrl}||${color}`;
+    const cached = this.tintedSvgCache.get(key);
+    if (cached) return cached;
 
+    const idx = baseDataUrl.indexOf(",");
+    if (idx < 0) return baseDataUrl;
+    const header = baseDataUrl.slice(0, idx + 1);
+    const payload = baseDataUrl.slice(idx + 1);
+
+    let svg: string;
+    try {
+      svg = decodeURIComponent(payload);
+    } catch {
+      return baseDataUrl;
+    }
+
+    const tinted = tintSvgMarkupLocal(svg, color);
+    const out = header + encodeURIComponent(tinted);
+    this.tintedSvgCache.set(key, out);
+    return out;
+  }
+  
   private renderAll(): void {
     this.worldEl.style.width = `${this.imgW}px`;
     this.worldEl.style.height = `${this.imgH}px`;
@@ -2337,29 +2383,35 @@ private onContextMenuViewport(e: MouseEvent): void {
         icon = anch.createEl("img", { cls: "zm-marker-icon" });
         icon.src = this.resolveResourceUrl(m.stickerPath ?? "");
         icon.style.width = `${size}px`;
-        icon.style.height = `${size}px`;
+        icon.style.height = "auto";
         icon.draggable = false;
         anch.appendChild(icon);
       } else {
         const scaleLike = isScaleLikeSticker(m);
         const info = this.getIconInfo(m.iconKey);
 
+        let imgUrl = info.imgUrl;
+        const markerColor = m.iconColor?.trim();
+        if (markerColor && isSvgDataUrl(imgUrl)) {
+          imgUrl = this.getTintedSvgDataUrl(imgUrl, markerColor);
+        }
+
         if (isHud) {
           const anch = host.createDiv({ cls: "zm-marker-anchor" });
           anch.style.transform = `translate(${-info.anchorX}px, ${-info.anchorY}px)`;
           icon = anch.createEl("img", { cls: "zm-marker-icon" });
-          icon.src = info.imgUrl;
+          icon.src = imgUrl;
           icon.style.width = `${info.size}px`;
-          icon.style.height = `${info.size}px`;
+          icon.style.height = "auto";
           icon.draggable = false;
           anch.appendChild(icon);
         } else if (scaleLike) {
           const anch = host.createDiv({ cls: "zm-marker-anchor" });
           anch.style.transform = `translate(${-info.anchorX}px, ${-info.anchorY}px)`;
           icon = anch.createEl("img", { cls: "zm-marker-icon" });
-          icon.src = info.imgUrl;
+          icon.src = imgUrl;
           icon.style.width = `${info.size}px`;
-          icon.style.height = `${info.size}px`;
+          icon.style.height = "auto";
           icon.draggable = false;
           anch.appendChild(icon);
         } else {
@@ -2369,9 +2421,9 @@ private onContextMenuViewport(e: MouseEvent): void {
           const anch = inv.createDiv({ cls: "zm-marker-anchor" });
           anch.style.transform = `translate(${-info.anchorX}px, ${-info.anchorY}px)`;
           icon = anch.createEl("img", { cls: "zm-marker-icon" });
-          icon.src = info.imgUrl;
+          icon.src = imgUrl;
           icon.style.width = `${info.size}px`;
-          icon.style.height = `${info.size}px`;
+          icon.style.height = "auto";
           icon.draggable = false;
           anch.appendChild(icon);
         }
@@ -2407,13 +2459,11 @@ private onContextMenuViewport(e: MouseEvent): void {
         const vy = e.clientY - vpRectNow.top;
 
         if (isHud) {
-          // HUD pins: keep offset in viewport pixels
           this.dragAnchorOffset = {
             dx: vx - leftScreen,
             dy: vy - topScreen,
           };
         } else {
-          // World pins/stickers: compute offset in image (world) coordinates
           const wxPointer = (vx - this.tx) / this.scale;
           const wyPointer = (vy - this.ty) / this.scale;
           const markerWx = m.x * this.imgW;
@@ -2432,13 +2482,11 @@ private onContextMenuViewport(e: MouseEvent): void {
       });
 
       host.addEventListener("pointerup", () => {
-	    if (this.draggingMarkerId === m.id) {
-		// Visual cleanup; logical finalization (classification + save)
-		// is handled centrally in onPointerUp() on the window.
-		  host.classList.remove("zm-marker--dragging");
-		  document.body.classList.remove("zm-cursor-grabbing");
-	    }
-	  });
+        if (this.draggingMarkerId === m.id) {
+          host.classList.remove("zm-marker--dragging");
+          document.body.classList.remove("zm-cursor-grabbing");
+        }
+      });
 
       host.addEventListener("contextmenu", (ev: MouseEvent) => {
         ev.preventDefault();
@@ -2473,7 +2521,8 @@ private onContextMenuViewport(e: MouseEvent): void {
             },
           },
           {
-            label: m.type === "sticker" ? "Delete sticker" : "Delete marker",
+            label:
+              m.type === "sticker" ? "Delete sticker" : "Delete marker",
             action: () => {
               this.deleteMarker(m);
               this.closeMenu();
@@ -2485,7 +2534,8 @@ private onContextMenuViewport(e: MouseEvent): void {
           items.push({
             label: "Pin sizes for this map…",
             action: () => {
-              const key = m.iconKey ?? this.plugin.settings.defaultIconKey;
+              const key =
+                m.iconKey ?? this.plugin.settings.defaultIconKey;
               this.openPinSizeEditor(key);
               this.closeMenu();
             },
@@ -2498,7 +2548,8 @@ private onContextMenuViewport(e: MouseEvent): void {
         const outside = (event: Event) => {
           if (!this.openMenu) return;
           const t = event.target;
-          if (t instanceof HTMLElement && this.openMenu.contains(t)) return;
+          if (t instanceof HTMLElement && this.openMenu.contains(t))
+            return;
           this.closeMenu();
         };
         const keyClose = (event: KeyboardEvent) => {
@@ -2506,15 +2557,23 @@ private onContextMenuViewport(e: MouseEvent): void {
         };
         const rightClickClose = () => this.closeMenu();
 
-        document.addEventListener("pointerdown", outside, { capture: true });
+        document.addEventListener("pointerdown", outside, {
+          capture: true,
+        });
         document.addEventListener("contextmenu", rightClickClose, {
           capture: true,
         });
-        document.addEventListener("keydown", keyClose, { capture: true });
+        document.addEventListener("keydown", keyClose, {
+          capture: true,
+        });
 
         this.register(() => {
           document.removeEventListener("pointerdown", outside, true);
-          document.removeEventListener("contextmenu", rightClickClose, true);
+          document.removeEventListener(
+            "contextmenu",
+            rightClickClose,
+            true,
+          );
           document.removeEventListener("keydown", keyClose, true);
         });
       });

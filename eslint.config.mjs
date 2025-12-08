@@ -3,6 +3,7 @@ import { defineConfig } from "eslint/config";
 import js from "@eslint/js";
 import globals from "globals";
 import tsparser from "@typescript-eslint/parser";
+import tseslint from "@typescript-eslint/eslint-plugin";
 import obsidianmd from "eslint-plugin-obsidianmd";
 
 export default defineConfig([
@@ -36,6 +37,7 @@ export default defineConfig([
     },
     plugins: {
       obsidianmd,
+      "@typescript-eslint": tseslint,
     },
     rules: {
       // Basis-JavaScript-Regeln
@@ -43,6 +45,16 @@ export default defineConfig([
 
       // Optional: Konsolen-Logging erlauben
       "no-console": "off",
+
+      // TypeScript-aware unused-vars; disable base rule
+      "no-unused-vars": "off",
+      "@typescript-eslint/no-unused-vars": [
+        "error",
+        {
+          argsIgnorePattern: "^_",
+          varsIgnorePattern: "^_",
+        },
+      ],
 
       // Obsidian-spezifische Regeln (minimaler sinnvoller Satz)
       "obsidianmd/commands/no-command-in-command-id": "error",

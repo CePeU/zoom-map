@@ -32,6 +32,7 @@ export interface Marker {
   layer: string;
   link?: string;
   iconKey?: string;
+  iconColor?: string; // per-pin SVG color override
   tooltip?: string;
 
   // Marker type + sticker fields

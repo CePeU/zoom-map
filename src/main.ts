@@ -5,6 +5,7 @@ import {
   parseYaml,
   normalizePath,
   TFile,
+  TFolder,
   Notice,
   setIcon,
   requestUrl,
@@ -16,7 +17,6 @@ import { ImageFileSuggestModal } from "./iconFileSuggest";
 import { CollectionEditorModal } from "./collectionsModals";
 import { JsonFileSuggestModal } from "./jsonFileSuggest";
 import { FaIconPickerModal } from "./faIconPickerModal";
-import { FaCreateIconModal } from "./faCreateIconModal"
 
 /* ---------------- Utils ---------------- */
 
@@ -225,12 +225,18 @@ async function readSavedFrame(
   return null;
 }
 
+interface FaSvgCache {
+  folder: string;
+  files: TFile[];
+}
+
 /* ---------------- Plugin ---------------- */
 
 export default class ZoomMapPlugin extends Plugin {
   settings: ZoomMapSettings = DEFAULT_SETTINGS;
 
   activeMap: MapInstance | null = null;
+  private faSvgCache: FaSvgCache | null = null;
 
   setActiveMap(inst: MapInstance): void {
     this.activeMap = inst;
@@ -415,6 +421,51 @@ export default class ZoomMapPlugin extends Plugin {
       await this.app.vault.createFolder(folder);
     }
   }
+  
+  getFaSvgFiles(forceRescan = false): TFile[] {
+    const ext = this.settings as ZoomMapSettingsExtended;
+    const folderPath = normalizePath(
+      ext.faFolderPath?.trim() || "ZoomMap/FontAwesome",
+    );
+
+    if (
+      !forceRescan &&
+      this.faSvgCache &&
+      this.faSvgCache.folder === folderPath
+    ) {
+      return this.faSvgCache.files;
+    }
+
+    const root = this.app.vault.getAbstractFileByPath(folderPath);
+    if (!(root instanceof TFolder)) {
+      this.faSvgCache = { folder: folderPath, files: [] };
+      return [];
+    }
+
+    const out: TFile[] = [];
+    const stack: TFolder[] = [root];
+
+    while (stack.length > 0) {
+      const current = stack.pop()!;
+      for (const child of current.children) {
+        if (child instanceof TFolder) {
+          stack.push(child);
+        } else if (child instanceof TFile) {
+          if (child.extension?.toLowerCase() === "svg") {
+            out.push(child);
+          }
+        }
+      }
+    }
+
+    out.sort((a, b) => a.path.localeCompare(b.path));
+    this.faSvgCache = { folder: folderPath, files: out };
+    return out;
+  }
+
+  clearFaSvgCache(): void {
+    this.faSvgCache = null;
+  }
 
   async saveLibraryToPath(path: string): Promise<void> {
     const p = normalizePath(path);
@@ -481,11 +532,12 @@ export default class ZoomMapPlugin extends Plugin {
 
   async downloadFontAwesomeZip(): Promise<void> {
     const ext = this.settings as ZoomMapSettingsExtended;
-    const folder = normalizePath(ext.faFolderPath?.trim() || "ZoomMap/FontAwesome");
+    const folder = normalizePath(
+      ext.faFolderPath?.trim() || "ZoomMap/FontAwesome",
+    );
     const zipPath = normalizePath(`${folder}/fontawesome-free.zip`);
 
     try {
-      // Ensure target folder exists
       if (!this.app.vault.getAbstractFileByPath(folder)) {
         await this.app.vault.createFolder(folder);
       }
@@ -498,9 +550,10 @@ export default class ZoomMapPlugin extends Plugin {
       });
 
       const data = res.arrayBuffer;
-      // Write ZIP file into the vault
       // @ts-expect-error writeBinary is available on desktop adapters
       await this.app.vault.adapter.writeBinary(zipPath, data);
+
+      this.clearFaSvgCache();
 
       new Notice(
         `Downloaded Font Awesome ZIP to ${zipPath}. Please unzip it so that SVG files are available in this folder.`,
@@ -513,14 +566,135 @@ export default class ZoomMapPlugin extends Plugin {
   }
 }
 
+function tintSvgMarkup(svg: string, color: string): string {
+  const c = color.trim();
+  if (!c) return svg;
+
+  let s = svg;
+
+  // Replace existing fill/stroke
+  s = s.replace(/fill="[^"]*"/gi, `fill="${c}"`);
+  s = s.replace(/stroke="[^"]*"/gi, `stroke="${c}"`);
+
+  // Ensure root <svg> has a fill if none existed
+  if (!/fill="/i.test(s)) {
+    s = s.replace(/<svg([^>]*?)>/i, `<svg$1 fill="${c}">`);
+  }
+
+  return s;
+}
+
 /* ---------------- Settings Tab ---------------- */
 
 class ZoomMapSettingTab extends PluginSettingTab {
   plugin: ZoomMapPlugin;
 
+  private svgFileCache = new Map<string, string>();
+
   constructor(app: App, plugin: ZoomMapPlugin) {
     super(app, plugin);
     this.plugin = plugin;
+  }
+
+  private async addFontAwesomeIcon(file: TFile): Promise<void> {
+    try {
+      const svg = await this.app.vault.read(file);
+      const defaultColor = "#b0b0b0"; // medium gray, visible in light and dark themes
+      const tinted = tintSvgMarkup(svg, defaultColor);
+      const dataUrl =
+        "data:image/svg+xml;charset=UTF-8," + encodeURIComponent(tinted);
+
+      const icons = this.plugin.settings.icons ?? [];
+
+      let baseKey = file.name.replace(/\.svg$/i, "");
+      baseKey = baseKey.replace(/\s+/g, "-");
+      let key = baseKey;
+      let idx = 1;
+      while (icons.some((i) => i.key === key)) {
+        key = `${baseKey}-${idx++}`;
+      }
+
+      icons.push({
+        key,
+        pathOrDataUrl: dataUrl,
+        size: 24,
+        anchorX: 12,
+        anchorY: 12,
+      });
+
+      this.plugin.settings.icons = icons;
+      await this.plugin.saveSettings();
+      this.display();
+    } catch (e) {
+      console.error("Zoom Map: failed to add Font Awesome icon", e);
+      new Notice("Failed to add font awesome icon.", 2500);
+    }
+  }
+
+  private async recolorIconSvg(icon: IconProfile, color: string): Promise<void> {
+    const c = color.trim();
+    if (!c) return;
+
+    let svg: string | null = null;
+    const src = icon.pathOrDataUrl ?? "";
+
+    if (typeof src === "string" && src.startsWith("data:image/svg+xml")) {
+      const idx = src.indexOf(",");
+      if (idx >= 0) {
+        try {
+          const payload = src.slice(idx + 1);
+          svg = decodeURIComponent(payload);
+        } catch {
+          svg = null;
+        }
+      }
+    } else if (typeof src === "string" && src.toLowerCase().endsWith(".svg")) {
+      const cached = this.svgFileCache.get(src);
+      if (cached) {
+        svg = cached;
+      } else {
+        const f = this.app.vault.getAbstractFileByPath(src);
+        if (f instanceof TFile) {
+          try {
+            const text = await this.app.vault.read(f);
+            this.svgFileCache.set(src, text);
+            svg = text;
+          } catch {
+            svg = null;
+          }
+        }
+      }
+    }
+
+    if (!svg) return;
+
+    const tinted = tintSvgMarkup(svg, c);
+    const dataUrl =
+      "data:image/svg+xml;charset=UTF-8," + encodeURIComponent(tinted);
+
+    icon.pathOrDataUrl = dataUrl;
+    await this.plugin.saveSettings();
+  }
+
+  private getSvgColorFromDataUrl(dataUrl: string): string | null {
+    if (typeof dataUrl !== "string") return null;
+    if (!dataUrl.startsWith("data:image/svg+xml")) return null;
+    const idx = dataUrl.indexOf(",");
+    if (idx < 0) return null;
+    try {
+      const payload = dataUrl.slice(idx + 1);
+      const svg = decodeURIComponent(payload);
+
+      const mFill = /fill="([^"]+)"/i.exec(svg);
+      if (mFill) return mFill[1];
+
+      const mStroke = /stroke="([^"]+)"/i.exec(svg);
+      if (mStroke) return mStroke[1];
+
+      return null;
+    } catch {
+      return null;
+    }
   }
 
   display(): void {
@@ -533,7 +707,9 @@ class ZoomMapSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("Storage location by default")
-      .setDesc("Store marker data in JSON beside image, or inline in the note.")
+      .setDesc(
+        "Store marker data in JSON beside image, or inline in the note.",
+      )
       .addDropdown((d) => {
         d.addOption("json", "JSON file (beside image)");
         d.addOption("note", "Inside the note (hidden comment)");
@@ -549,7 +725,9 @@ class ZoomMapSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("Default width when wrapped")
-      .setDesc("Initial width if wrap: true and no width is set in the code block.")
+      .setDesc(
+        "Initial width if wrap: true and no width is set in the code block.",
+      )
       .addText((t) => {
         const ext = this.plugin.settings as ZoomMapSettingsExtended;
         t.setPlaceholder("50%");
@@ -587,7 +765,8 @@ class ZoomMapSettingTab extends PluginSettingTab {
         d.addOption("middle", "Middle");
         d.setValue(this.plugin.settings.panMouseButton ?? "left");
         d.onChange((v) => {
-          this.plugin.settings.panMouseButton = v === "middle" ? "middle" : "left";
+          this.plugin.settings.panMouseButton =
+            v === "middle" ? "middle" : "left";
           void this.plugin.saveSettings();
         });
       });
@@ -634,7 +813,9 @@ class ZoomMapSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("Open editor when placing pin from menu")
-      .setDesc("When enabled, placing a pin from the pins menu opens the marker editor.")
+      .setDesc(
+        "When enabled, placing a pin from the pins menu opens the marker editor.",
+      )
       .addToggle((t) =>
         t
           .setValue(!!this.plugin.settings.pinPlaceOpensEditor)
@@ -648,8 +829,13 @@ class ZoomMapSettingTab extends PluginSettingTab {
     new Setting(containerEl).setName("Ruler").setHeading();
 
     const applyStyleToAll = () => {
-      const color = (this.plugin.settings.measureLineColor ?? "var(--text-accent)").trim();
-      const widthPx = Math.max(1, this.plugin.settings.measureLineWidth ?? 2);
+      const color = (
+        this.plugin.settings.measureLineColor ?? "var(--text-accent)"
+      ).trim();
+      const widthPx = Math.max(
+        1,
+        this.plugin.settings.measureLineWidth ?? 2,
+      );
       document.querySelectorAll(".zm-root").forEach((el) => {
         if (el instanceof HTMLElement) {
           el.style.setProperty("--zm-measure-color", color);
@@ -665,7 +851,9 @@ class ZoomMapSettingTab extends PluginSettingTab {
     colorRow.addText((t) =>
       t
         .setPlaceholder("Default")
-        .setValue(this.plugin.settings.measureLineColor ?? "var(--text-accent)")
+        .setValue(
+          this.plugin.settings.measureLineColor ?? "var(--text-accent)",
+        )
         .onChange((v) => {
           this.plugin.settings.measureLineColor =
             v?.trim() || "var(--text-accent)";
@@ -711,8 +899,8 @@ class ZoomMapSettingTab extends PluginSettingTab {
             }
           }),
       );
-	  
-	  // Custom units
+
+    // Custom units
     new Setting(containerEl).setName("Custom units").setHeading();
 
     const customUnitsWrap = containerEl.createDiv();
@@ -785,7 +973,7 @@ class ZoomMapSettingTab extends PluginSettingTab {
           id,
           name: "Hex",
           abbreviation: "hex",
-          metersPerUnit: 5 * 0.3048, // default 5 ft
+          metersPerUnit: 5 * 0.3048,
         } as CustomUnitDef);
         await this.plugin.saveSettings();
         renderCustomUnits();
@@ -814,10 +1002,16 @@ class ZoomMapSettingTab extends PluginSettingTab {
         cols.forEach((c) => {
           const row = list.createDiv({ cls: "zoommap-collections-row" });
           const left = row.createDiv();
-          const name = left.createEl("div", { text: c.name || "(unnamed collection)" });
+          const name = left.createEl("div", {
+            text: c.name || "(unnamed collection)",
+          });
           name.style.fontWeight = "600";
           const meta = left.createEl("div", {
-            text: `${c.bindings?.basePaths?.length ?? 0} bases • ${c.include?.pinKeys?.length ?? 0} pins • ${c.include?.favorites?.length ?? 0} favorites • ${c.include?.stickers?.length ?? 0} stickers`,
+            text: `${c.bindings?.basePaths?.length ?? 0} bases • ${
+              c.include?.pinKeys?.length ?? 0
+            } pins • ${c.include?.favorites?.length ?? 0} favorites • ${
+              c.include?.stickers?.length ?? 0
+            } stickers`,
           });
           meta.style.fontSize = "12px";
           meta.style.color = "var(--text-muted)";
@@ -830,7 +1024,8 @@ class ZoomMapSettingTab extends PluginSettingTab {
               c,
               async ({ updated, deleted }) => {
                 if (deleted) {
-                  const arr = this.plugin.settings.baseCollections ?? [];
+                  const arr =
+                    this.plugin.settings.baseCollections ?? [];
                   const pos = arr.indexOf(c);
                   if (pos >= 0) arr.splice(pos, 1);
                   await this.plugin.saveSettings();
@@ -856,13 +1051,15 @@ class ZoomMapSettingTab extends PluginSettingTab {
         });
       }
 
-      const actions = collectionsWrap.createDiv({ cls: "zoommap-collections-actions" });
+      const actions = collectionsWrap.createDiv({
+        cls: "zoommap-collections-actions",
+      });
       const add = actions.createEl("button", { text: "Add collection" });
       add.onclick = () => {
         const fresh: BaseCollection = {
           id: `col-${Math.random().toString(36).slice(2, 8)}`,
           name: "New Collection",
-          bindings: { basePaths: [] }, // unbound (global) until base added
+          bindings: { basePaths: [] },
           include: { pinKeys: [], favorites: [], stickers: [] },
         };
         new CollectionEditorModal(
@@ -884,14 +1081,15 @@ class ZoomMapSettingTab extends PluginSettingTab {
     };
     renderCollections();
 
-   /* ---------------- Marker icons (library) ---------------- */
+    /* ---------------- Marker icons (library) ---------------- */
 
     new Setting(containerEl).setName("Marker icons (library)").setHeading();
 
-    // Library file controls (icons + collections)
     const libRow = new Setting(containerEl)
       .setName("Library file (icons + collections)")
-      .setDesc("Choose a JSON file in the vault to save/load your icon library and collections.");
+      .setDesc(
+        "Choose a JSON file in the vault to save/load your icon library and collections.",
+      );
 
     libRow.addText((t) => {
       const ext = this.plugin.settings as ZoomMapSettingsExtended;
@@ -936,9 +1134,9 @@ class ZoomMapSettingTab extends PluginSettingTab {
     new Setting(containerEl).setName("Font awesome free").setHeading();
 
     const faRow = new Setting(containerEl)
-      .setName("Font awesome folder in vault")
+      .setName("SVG folder in vault")
       .setDesc(
-        "Zoom map will load SVG icons from this folder. Place SVG files here or download the font awesome free zip.",
+        "Place SVG files here or download the free font awesome zip.",
       );
 
     faRow.addText((t) => {
@@ -948,6 +1146,7 @@ class ZoomMapSettingTab extends PluginSettingTab {
       t.onChange((v) => {
         ext.faFolderPath = (v || "ZoomMap/FontAwesome").trim();
         void this.plugin.saveSettings();
+        this.plugin.clearFaSvgCache();
       });
     });
 
@@ -969,6 +1168,14 @@ class ZoomMapSettingTab extends PluginSettingTab {
     faRow.addButton((b) =>
       b.setButtonText("Download zip").onClick(async () => {
         await this.plugin.downloadFontAwesomeZip();
+      }),
+    );
+
+    faRow.addButton((b) =>
+      b.setButtonText("Rescan icons").onClick(() => {
+        this.plugin.clearFaSvgCache();
+        this.plugin.getFaSvgFiles(true);
+        new Notice("SVG list refreshed.", 2000);
       }),
     );
 
@@ -1015,7 +1222,9 @@ class ZoomMapSettingTab extends PluginSettingTab {
           void this.plugin.saveSettings();
         };
 
-        const pick = pathWrap.createEl("button", { attr: { title: "Choose file…" } });
+        const pick = pathWrap.createEl("button", {
+          attr: { title: "Choose file…" },
+        });
         pick.classList.add("zm-icon-btn");
         setIcon(pick, "folder-open");
         pick.onclick = () => {
@@ -1025,6 +1234,72 @@ class ZoomMapSettingTab extends PluginSettingTab {
             renderIcons();
           }).open();
         };
+
+        // SVG color controls (only meaningful for SVG icons)
+        const src = icon.pathOrDataUrl ?? "";
+        const isSvgCandidate =
+          typeof src === "string" &&
+          (src.startsWith("data:image/svg+xml") ||
+            src.toLowerCase().endsWith(".svg"));
+
+        if (isSvgCandidate) {
+          const currentColor =
+            typeof src === "string" && src.startsWith("data:image/svg+xml")
+              ? this.getSvgColorFromDataUrl(src) ?? ""
+              : "";
+
+          const colorInput = pathWrap.createEl("input", { type: "text" });
+          colorInput.placeholder = "Color";
+          colorInput.style.width = "10ch";
+          colorInput.value = currentColor;
+
+          const colorPicker = pathWrap.createEl("input", {
+            type: "color",
+          });
+          colorPicker.style.width = "32px";
+          colorPicker.style.padding = "0";
+
+          if (
+            currentColor &&
+            /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(currentColor)
+          ) {
+            if (currentColor.length === 4) {
+              const r = currentColor[1];
+              const g = currentColor[2];
+              const b = currentColor[3];
+              colorPicker.value = `#${r}${r}${g}${g}${b}${b}`;
+            } else {
+              colorPicker.value = currentColor;
+            }
+          }
+
+          const applyColor = (val: string) => {
+            const c = val.trim();
+            if (!c) return;
+            void this.recolorIconSvg(icon, c);
+          };
+
+          colorInput.addEventListener("change", () => {
+            const val = colorInput.value;
+            applyColor(val);
+            if (/^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(val)) {
+              if (val.length === 4) {
+                const r = val[1];
+                const g = val[2];
+                const b = val[3];
+                colorPicker.value = `#${r}${r}${g}${g}${b}${b}`;
+              } else {
+                colorPicker.value = val;
+              }
+            }
+          });
+
+          colorPicker.addEventListener("input", () => {
+            const hex = colorPicker.value;
+            colorInput.value = hex;
+            applyColor(hex);
+          });
+        }
 
         const size = row.createEl("input", { type: "number" });
         size.classList.add("zm-num");
@@ -1063,7 +1338,9 @@ class ZoomMapSettingTab extends PluginSettingTab {
         del.classList.add("zm-icon-btn");
         setIcon(del, "trash");
         del.onclick = () => {
-          this.plugin.settings.icons = this.plugin.settings.icons.filter((i) => i !== icon);
+          this.plugin.settings.icons = this.plugin.settings.icons.filter(
+            (i) => i !== icon,
+          );
           void this.plugin.saveSettings();
           renderIcons();
         };
@@ -1091,21 +1368,17 @@ class ZoomMapSettingTab extends PluginSettingTab {
       )
       .addButton((b) =>
         b.setButtonText("Add from font awesome…").onClick(() => {
-          const ext = this.plugin.settings as ZoomMapSettingsExtended;
-          const folder =
-            ext.faFolderPath?.trim() || "ZoomMap/FontAwesome";
+          const files = this.plugin.getFaSvgFiles();
+          if (!files.length) {
+            new Notice(
+              "No SVG icons found.",
+              2500,
+            );
+            return;
+          }
 
-          new FaIconPickerModal(this.app, folder, (file: TFile) => {
-            new FaCreateIconModal(
-              this.app,
-              this.plugin,
-              file,
-              async (profile) => {
-                this.plugin.settings.icons.push(profile);
-                await this.plugin.saveSettings();
-                this.display();
-              },
-            ).open();
+          new FaIconPickerModal(this.app, files, (file: TFile) => {
+            void this.addFontAwesomeIcon(file);
           }).open();
         }),
       );

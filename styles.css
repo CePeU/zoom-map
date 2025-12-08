@@ -217,8 +217,6 @@
 } /* translate(-anchorX, -anchorY) */
 
 .zm-marker-icon {
-  width: 24px;
-  height: 24px;
   image-rendering: auto;
   user-select: none;
   -webkit-user-drag: none;
@@ -652,4 +650,93 @@ body.zm-cursor-resize-nwse {
 
 body.zm-cursor-resize-nesw {
   cursor: nesw-resize;
+}
+
+/* Font Awesome picker (settings) */
+.zoommap-fa-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.zoommap-fa-picker-search input {
+  width: 100%;
+}
+
+.zoommap-fa-picker-list {
+  max-height: 340px;
+  overflow: auto;
+  padding: 6px;
+  border-radius: 6px;
+  background: var(--background-secondary-alt, var(--background-secondary));
+  border: 1px solid var(--background-modifier-border);
+}
+
+/* In dark theme, slightly lighten the list background to improve SVG contrast */
+.theme-dark .zoommap-fa-picker-list {
+  /* Fallback stays the same if color-mix is not supported */
+  background: var(--background-secondary-alt, var(--background-secondary));
+  /* Prefer a mixed color if supported by the engine */
+  background: color-mix(
+    in srgb,
+    var(--background-secondary-alt, var(--background-secondary)) 70%,
+    var(--text-normal) 30%
+  );
+}
+
+/* Grid of SVG files */
+.zoommap-fa-picker-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 6px;
+}
+
+/* Each SVG cell */
+.zoommap-fa-picker-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 4px;
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  cursor: pointer;
+}
+
+.zoommap-fa-picker-cell:hover {
+  background: var(--background-modifier-hover);
+}
+
+/* In dark theme, make cells a bit lighter so dark SVGs stand out */
+.theme-dark .zoommap-fa-picker-cell {
+  background: color-mix(
+    in srgb,
+    var(--background-primary) 65%,
+    var(--text-normal) 35%
+  );
+}
+
+/* Selected cell outline */
+.zoommap-fa-picker-cell.is-selected {
+  border-color: var(--interactive-accent);
+  box-shadow: 0 0 0 1px var(--interactive-accent);
+}
+
+.zoommap-fa-picker-icon {
+  width: 24px;
+  height: 24px;
+  object-fit: contain;
+}
+
+.zoommap-fa-picker-label {
+  font-size: 11px;
+  text-align: center;
+  word-break: break-word;
+}
+
+.zoommap-fa-picker-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
 }

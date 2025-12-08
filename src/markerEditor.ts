@@ -17,6 +17,22 @@ export interface MarkerEditorResult {
 /* eslint-disable-next-line no-unused-vars */
 type MarkerEditorCallback = (result: MarkerEditorResult) => void;
 
+function tintSvgMarkup(svg: string, color: string): string {
+  const c = color.trim();
+  if (!c) return svg;
+
+  let s = svg;
+
+  s = s.replace(/fill="[^"]*"/gi, `fill="${c}"`);
+  s = s.replace(/stroke="[^"]*"/gi, `stroke="${c}"`);
+
+  if (!/fill="/i.test(s)) {
+    s = s.replace(/<svg([^>]*?)>/i, `<svg$1 fill="${c}">`);
+  }
+
+  return s;
+}
+
 export class MarkerEditorModal extends Modal {
   private plugin: ZoomMapPlugin;
   private data: MarkerFileData;
@@ -45,7 +61,9 @@ export class MarkerEditorModal extends Modal {
   }
 
   private buildLinkSuggestions(): void {
-    const files = this.app.vault.getFiles().filter((f) => f.extension?.toLowerCase() === "md");
+    const files = this.app.vault
+      .getFiles()
+      .filter((f) => f.extension?.toLowerCase() === "md");
     const suggestions: LinkSuggestion[] = [];
 
     const active = this.app.workspace.getActiveFile();
@@ -54,13 +72,11 @@ export class MarkerEditorModal extends Modal {
     for (const file of files) {
       const baseLink = this.app.metadataCache.fileToLinktext(file, fromPath);
 
-      // Basis: nur die Note
       suggestions.push({
         label: baseLink,
         value: baseLink,
       });
 
-      // Überschriften
       const cache = this.app.metadataCache.getCache(file.path);
       const headings = cache?.headings ?? [];
       for (const h of headings) {
@@ -91,9 +107,10 @@ export class MarkerEditorModal extends Modal {
 
     const maxItems = 20;
     const matches = this.allSuggestions
-      .filter((s) =>
-        s.value.toLowerCase().includes(query) ||
-        s.label.toLowerCase().includes(query),
+      .filter(
+        (s) =>
+          s.value.toLowerCase().includes(query) ||
+          s.label.toLowerCase().includes(query),
       )
       .slice(0, maxItems);
 
@@ -106,14 +123,15 @@ export class MarkerEditorModal extends Modal {
     this.suggestionsEl.style.display = "";
 
     matches.forEach((s, i) => {
-      const row = this.suggestionsEl!.createDiv({ cls: "zoommap-link-suggestion-item" });
+      const row = this.suggestionsEl!.createDiv({
+        cls: "zoommap-link-suggestion-item",
+      });
       row.setText(s.label);
       if (i === 0) {
         row.classList.add("is-selected");
         this.selectedSuggestionIndex = 0;
       }
       row.addEventListener("mousedown", (ev) => {
-        // mousedown statt click, damit blur des Inputs nicht vorher feuert
         ev.preventDefault();
         this.applyLinkSuggestion(i);
       });
@@ -138,7 +156,10 @@ export class MarkerEditorModal extends Modal {
     idx = (idx + delta + n) % n;
     this.selectedSuggestionIndex = idx;
 
-    const rows = this.suggestionsEl.querySelectorAll<HTMLDivElement>(".zoommap-link-suggestion-item");
+    const rows =
+      this.suggestionsEl.querySelectorAll<HTMLDivElement>(
+        ".zoommap-link-suggestion-item",
+      );
     rows.forEach((row, i) => {
       if (i === idx) row.classList.add("is-selected");
       else row.classList.remove("is-selected");
@@ -157,12 +178,11 @@ export class MarkerEditorModal extends Modal {
     this.marker.link = s.value;
     this.hideLinkSuggestions();
 
-    // Fokus zurück auf das Eingabefeld
     this.linkInput.inputEl.focus();
     const len = s.value.length;
     this.linkInput.inputEl.setSelectionRange(len, len);
   }
-  
+
   private zoomFactorToPercentString(f?: number): string {
     if (typeof f !== "number" || !Number.isFinite(f) || f <= 0) return "";
     return String(Math.round(f * 100));
@@ -189,7 +209,10 @@ export class MarkerEditorModal extends Modal {
       max = undefined;
     }
 
-    if (min === undefined && max === undefined) {
+    if (
+      min === undefined &&
+      max === undefined
+    ) {
       delete this.marker.minZoom;
       delete this.marker.maxZoom;
       return;
@@ -211,12 +234,17 @@ export class MarkerEditorModal extends Modal {
   onOpen(): void {
     const { contentEl } = this;
     contentEl.empty();
-    contentEl.createEl("h2", { text: this.marker.type === "sticker" ? "Edit sticker" : "Edit marker" });
+    contentEl.createEl("h2", {
+      text:
+        this.marker.type === "sticker" ? "Edit sticker" : "Edit marker",
+    });
 
     if (this.marker.type !== "sticker") {
       const linkSetting = new Setting(contentEl)
         .setName("Link")
-        .setDesc("Wiki link (without [[ ]]). Supports note and note#heading.");
+        .setDesc(
+          "Wiki link (without [[ ]]). Supports note and note#heading.",
+        );
 
       linkSetting.addText((t) => {
         this.linkInput = t;
@@ -230,14 +258,20 @@ export class MarkerEditorModal extends Modal {
         const wrapper = t.inputEl.parentElement;
         if (wrapper instanceof HTMLElement) {
           wrapper.classList.add("zoommap-link-input-wrapper");
-          this.suggestionsEl = wrapper.createDiv({ cls: "zoommap-link-suggestions" });
+          this.suggestionsEl = wrapper.createDiv({
+            cls: "zoommap-link-suggestions",
+          });
           this.suggestionsEl.style.display = "none";
         }
 
         this.buildLinkSuggestions();
 
         t.inputEl.addEventListener("keydown", (ev) => {
-          if (!this.suggestionsEl || this.suggestionsEl.style.display === "none") return;
+          if (
+            !this.suggestionsEl ||
+            this.suggestionsEl.style.display === "none"
+          )
+            return;
 
           if (ev.key === "ArrowDown") {
             ev.preventDefault();
@@ -266,10 +300,11 @@ export class MarkerEditorModal extends Modal {
           a.setPlaceholder("Optional tooltip text");
           a.inputEl.rows = 3;
           a.setValue(this.marker.tooltip ?? "");
-          a.onChange((v) => { this.marker.tooltip = v; });
+          a.onChange((v) => {
+            this.marker.tooltip = v;
+          });
         });
 
-      // Zoom range (optional)
       const zoomRow = new Setting(contentEl)
         .setName("Zoom range (optional)")
         .setDesc("(in %)");
@@ -303,6 +338,71 @@ export class MarkerEditorModal extends Modal {
             else delete this.marker.scaleLikeSticker;
           });
         });
+
+      // Icon selection
+      new Setting(contentEl)
+        .setName("Icon")
+        .setDesc("To set up new icons go to settings.")
+        .addDropdown((d) => {
+          for (const icon of this.plugin.settings.icons) {
+            d.addOption(icon.key, icon.key);
+          }
+          d.setValue(
+            this.marker.iconKey ?? this.plugin.settings.defaultIconKey,
+          );
+          d.onChange((v) => {
+            this.marker.iconKey = v;
+            updatePreview();
+          });
+        });
+
+      // Per-pin icon color (always visible; only affects SVG icons)
+      const colorRow = new Setting(contentEl)
+        .setName("Icon color")
+        .setDesc(
+          "Overrides the icon color for this marker (SVG icons only).",
+        );
+
+      let colorTextEl: HTMLInputElement;
+      const colorPickerEl = colorRow.controlEl.createEl("input", {
+        attr: {
+          type: "color",
+          style: "margin-left:8px; vertical-align: middle;",
+        },
+      });
+
+      colorRow.addText((t) => {
+        t.setPlaceholder("#d23c3c");
+        t.setValue(this.marker.iconColor ?? "");
+        colorTextEl = t.inputEl;
+        t.onChange((v) => {
+          const c = v.trim();
+          this.marker.iconColor = c || undefined;
+          updatePreview();
+        });
+      });
+
+      const existing = this.marker.iconColor;
+      if (
+        existing &&
+        /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(existing)
+      ) {
+        if (existing.length === 4) {
+          const r = existing[1];
+          const g = existing[2];
+          const b = existing[3];
+          colorPickerEl.value = `#${r}${r}${g}${g}${b}${b}`;
+        } else {
+          colorPickerEl.value = existing;
+        }
+      }
+
+      colorPickerEl.oninput = () => {
+        const c = colorPickerEl.value;
+        colorTextEl.value = c;
+        this.marker.iconColor = c;
+        updatePreview();
+      };
     }
 
     // Layer
@@ -312,40 +412,38 @@ export class MarkerEditorModal extends Modal {
       .setDesc("Choose an existing layer or type a new name.")
       .addDropdown((d) => {
         for (const l of this.data.layers) d.addOption(l.name, l.name);
-        const current = this.data.layers.find((l) => l.id === this.marker.layer)?.name ?? this.data.layers[0].name;
+        const current =
+          this.data.layers.find((l) => l.id === this.marker.layer)
+            ?.name ?? this.data.layers[0].name;
         d.setValue(current).onChange((v) => {
           const lyr = this.data.layers.find((l) => l.name === v);
           if (lyr) this.marker.layer = lyr.id;
         });
       })
-      .addText((t) => t.setPlaceholder("Create new layer (optional)").onChange((v) => { newLayerName = v.trim(); }));
+      .addText((t) =>
+        t
+          .setPlaceholder("Create new layer (optional)")
+          .onChange((v) => {
+            newLayerName = v.trim();
+          }),
+      );
 
-    // Icon or Sticker size
+    // Sticker size
     if (this.marker.type === "sticker") {
-	  new Setting(contentEl).setName("Size").addText((t) => {
-		t.setPlaceholder("64");
-		t.setValue(String(this.marker.stickerSize ?? 64));
-		t.onChange((v) => {
-		  const n = Number(v);
-		  if (Number.isFinite(n) && n > 0) {
-			this.marker.stickerSize = Math.round(n);
-			updatePreview(); // OPTIONAL: auch bei Größenänderung aktualisieren
-		  }
-		});
-	  });
-	} else {
-	  new Setting(contentEl)
-		.setName("Icon")
-		.setDesc("To set up new go to settings.")
-		.addDropdown((d) => {
-		  for (const icon of this.plugin.settings.icons) d.addOption(icon.key, icon.key);
-		  d.setValue(this.marker.iconKey ?? this.plugin.settings.defaultIconKey);
-		  d.onChange((v) => {
-			this.marker.iconKey = v;
-			updatePreview(); // WICHTIG: Vorschau neu laden
-		  });
-		});
-	}
+      new Setting(contentEl)
+        .setName("Size")
+        .addText((t) => {
+          t.setPlaceholder("64");
+          t.setValue(String(this.marker.stickerSize ?? 64));
+          t.onChange((v) => {
+            const n = Number(v);
+            if (Number.isFinite(n) && n > 0) {
+              this.marker.stickerSize = Math.round(n);
+              updatePreview();
+            }
+          });
+        });
+    }
 
     // Preview
     const preview = contentEl.createDiv({ cls: "zoommap-modal-preview" });
@@ -357,21 +455,51 @@ export class MarkerEditorModal extends Modal {
         let url = this.marker.stickerPath ?? "";
         if (url && !url.startsWith("data:")) {
           const file = this.app.vault.getAbstractFileByPath(url);
-          if (file instanceof TFile) url = this.app.vault.getResourcePath(file);
+          if (file instanceof TFile) {
+            url = this.app.vault.getResourcePath(file);
+          }
         }
-        const size = Math.max(1, Math.round(this.marker.stickerSize ?? 64));
+        const size = Math.max(
+          1,
+          Math.round(this.marker.stickerSize ?? 64),
+        );
         return { url, size };
       }
 
-      const icon = this.plugin.settings.icons.find((i) => i.key === (this.marker.iconKey ?? this.plugin.settings.defaultIconKey))
-        ?? this.plugin.builtinIcon();
+      const baseIcon =
+        this.plugin.settings.icons.find(
+          (i) =>
+            i.key ===
+            (this.marker.iconKey ??
+              this.plugin.settings.defaultIconKey),
+        ) ?? this.plugin.builtinIcon();
 
-      let url = icon.pathOrDataUrl;
+      let url = baseIcon.pathOrDataUrl;
+      const size = baseIcon.size;
+
+      const color = this.marker.iconColor?.trim();
+      if (color && url && url.startsWith("data:image/svg+xml")) {
+        const idx = url.indexOf(",");
+        if (idx >= 0) {
+          try {
+            const header = url.slice(0, idx + 1);
+            const payload = url.slice(idx + 1);
+            const svg = decodeURIComponent(payload);
+            const tinted = tintSvgMarkup(svg, color);
+            url = header + encodeURIComponent(tinted);
+          } catch {
+            // ignore, fall back to original URL
+          }
+        }
+      }
+
       if (url && !url.startsWith("data:")) {
         const file = this.app.vault.getAbstractFileByPath(url);
-        if (file instanceof TFile) url = this.app.vault.getResourcePath(file);
+        if (file instanceof TFile) {
+          url = this.app.vault.getResourcePath(file);
+        }
       }
-      return { url, size: icon.size };
+      return { url, size };
     };
 
     const updatePreview = () => {
@@ -385,16 +513,29 @@ export class MarkerEditorModal extends Modal {
     // Footer
     const footer = contentEl.createDiv({ cls: "zoommap-modal-footer" });
     const btnSave = footer.createEl("button", { text: "Save" });
-    const btnDelete = footer.createEl("button", { text: this.marker.type === "sticker" ? "Delete sticker" : "Delete marker" });
+    const btnDelete = footer.createEl("button", {
+      text:
+        this.marker.type === "sticker"
+          ? "Delete sticker"
+          : "Delete marker",
+    });
     const btnCancel = footer.createEl("button", { text: "Cancel" });
 
     btnSave.addEventListener("click", () => {
       let dataChanged = false;
       if (newLayerName) {
-        const exists = this.data.layers.find((l) => l.name === newLayerName);
+        const exists = this.data.layers.find(
+          (l) => l.name === newLayerName,
+        );
         if (!exists) {
-          const id = `layer_${Math.random().toString(36).slice(2, 8)}`;
-          this.data.layers.push({ id, name: newLayerName, visible: true });
+          const id = `layer_${Math.random()
+            .toString(36)
+            .slice(2, 8)}`;
+          this.data.layers.push({
+            id,
+            name: newLayerName,
+            visible: true,
+          });
           this.marker.layer = id;
           dataChanged = true;
         }
@@ -403,13 +544,22 @@ export class MarkerEditorModal extends Modal {
       if (this.marker.type !== "sticker") {
         this.normalizeZoomRange();
 
-        if (typeof this.marker.minZoom !== "number") delete this.marker.minZoom;
-        if (typeof this.marker.maxZoom !== "number") delete this.marker.maxZoom;
-        if (!this.marker.scaleLikeSticker) delete this.marker.scaleLikeSticker;
+        if (typeof this.marker.minZoom !== "number")
+          delete this.marker.minZoom;
+        if (typeof this.marker.maxZoom !== "number")
+          delete this.marker.maxZoom;
+        if (!this.marker.scaleLikeSticker)
+          delete this.marker.scaleLikeSticker;
+        if (!this.marker.iconColor)
+          delete this.marker.iconColor;
       }
 
       this.close();
-      this.onResult({ action: "save", marker: this.marker, dataChanged });
+      this.onResult({
+        action: "save",
+        marker: this.marker,
+        dataChanged,
+      });
     });
 
     btnDelete.addEventListener("click", () => {

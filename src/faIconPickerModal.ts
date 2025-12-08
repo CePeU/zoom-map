@@ -1,55 +1,35 @@
-import { Modal, normalizePath, TFolder, TFile } from "obsidian";
+import { Modal, TFile } from "obsidian";
 import type { App } from "obsidian";
 
-// Callback used when an icon has been chosen.
-/* eslint-disable-next-line no-unused-vars */
 type FaIconPickerCallback = (file: TFile) => void;
 
 export class FaIconPickerModal extends Modal {
-  private folder: string;
   private onChoose: FaIconPickerCallback;
-  private files: TFile[] = [];
+  private files: TFile[];
+
   private listEl: HTMLDivElement | null = null;
   private searchInput: HTMLInputElement | null = null;
 
-  constructor(app: App, folder: string, onChoose: FaIconPickerCallback) {
+  private selected: TFile | null = null;
+  private selectedEl: HTMLDivElement | null = null;
+  private addButton: HTMLButtonElement | null = null;
+
+  constructor(app: App, files: TFile[], onChoose: FaIconPickerCallback) {
     super(app);
-    this.folder = normalizePath(folder);
+    this.files = files;
     this.onChoose = onChoose;
-  }
-
-  private collectFiles(): void {
-    this.files = [];
-
-    const root = this.app.vault.getAbstractFileByPath(this.folder);
-    if (!(root instanceof TFolder)) {
-      console.warn(`Zoom Map: Font Awesome folder not found: ${this.folder}`);
-      return;
-    }
-
-    const out: TFile[] = [];
-    const stack: TFolder[] = [root];
-
-    while (stack.length > 0) {
-      const current = stack.pop()!;
-      for (const child of current.children) {
-        if (child instanceof TFolder) {
-          stack.push(child);
-        } else if (child instanceof TFile) {
-          if (child.extension?.toLowerCase() === "svg") {
-            out.push(child);
-          }
-        }
-      }
-    }
-
-    out.sort((a, b) => a.path.localeCompare(b.path));
-    this.files = out;
   }
 
   private renderList(filter: string): void {
     if (!this.listEl) return;
     this.listEl.empty();
+
+    this.selected = null;
+    if (this.selectedEl) {
+      this.selectedEl.classList.remove("is-selected");
+      this.selectedEl = null;
+    }
+    if (this.addButton) this.addButton.disabled = true;
 
     const q = filter.trim().toLowerCase();
     const matches = this.files.filter((f) => {
@@ -66,38 +46,29 @@ export class FaIconPickerModal extends Modal {
       return;
     }
 
-    const grid = this.listEl.createDiv();
-    grid.style.display = "grid";
-    grid.style.gridTemplateColumns = "repeat(auto-fill, minmax(120px, 1fr))";
-    grid.style.gap = "6px";
+    const grid = this.listEl.createDiv({ cls: "zoommap-fa-picker-grid" });
 
     for (const file of matches) {
-      const cell = grid.createDiv();
-      cell.style.display = "flex";
-      cell.style.flexDirection = "column";
-      cell.style.alignItems = "center";
-      cell.style.gap = "4px";
-      cell.style.padding = "4px";
-      cell.style.borderRadius = "4px";
-      cell.style.border = "1px solid var(--background-modifier-border)";
-      cell.style.cursor = "pointer";
+      const cell = grid.createDiv({ cls: "zoommap-fa-picker-cell" });
 
-      const img = cell.createEl("img");
+      const img = cell.createEl("img", { cls: "zoommap-fa-picker-icon" });
       img.src = this.app.vault.getResourcePath(file);
-      img.style.width = "24px";
-      img.style.height = "24px";
-      img.style.objectFit = "contain";
 
-      const label = cell.createEl("div", {
+      cell.createDiv({
+        cls: "zoommap-fa-picker-label",
         text: file.name.replace(/\.svg$/i, ""),
       });
-      label.style.fontSize = "11px";
-      label.style.textAlign = "center";
-      label.style.wordBreak = "break-word";
 
       cell.onclick = () => {
-        this.close();
-        this.onChoose(file);
+        this.selected = file;
+
+        if (this.selectedEl && this.selectedEl !== cell) {
+          this.selectedEl.classList.remove("is-selected");
+        }
+        this.selectedEl = cell;
+        cell.classList.add("is-selected");
+
+        if (this.addButton) this.addButton.disabled = false;
       };
     }
   }
@@ -105,30 +76,39 @@ export class FaIconPickerModal extends Modal {
   onOpen(): void {
     const { contentEl } = this;
     contentEl.empty();
-
-    this.collectFiles();
+    contentEl.addClass("zoommap-fa-picker");
 
     contentEl.createEl("h2", { text: "Pick font awesome icon" });
 
     if (this.files.length === 0) {
       contentEl.createEl("div", {
-        text: "No SVG icons found. Place font awesome free SVG files into the configured folder.",
+        text: "No SVG icons found.",
       });
       return;
     }
 
-    const searchRow = contentEl.createDiv();
-    searchRow.style.marginBottom = "8px";
-
+    const searchRow = contentEl.createDiv({ cls: "zoommap-fa-picker-search" });
     this.searchInput = searchRow.createEl("input", {
       type: "text",
       placeholder: "Search by name or path…",
     });
-    this.searchInput.style.width = "100%";
 
-    this.listEl = contentEl.createDiv();
-    this.listEl.style.maxHeight = "340px";
-    this.listEl.style.overflow = "auto";
+    this.listEl = contentEl.createDiv({ cls: "zoommap-fa-picker-list" });
+
+    const footer = contentEl.createDiv({
+      cls: "zoommap-fa-picker-footer zoommap-modal-footer",
+    });
+
+    this.addButton = footer.createEl("button", { text: "Add" });
+    this.addButton.disabled = true;
+    this.addButton.onclick = () => {
+      if (this.selected) {
+        this.onChoose(this.selected);
+      }
+    };
+
+    const backButton = footer.createEl("button", { text: "Back" });
+    backButton.onclick = () => this.close();
 
     this.searchInput.addEventListener("input", () => {
       this.renderList(this.searchInput?.value ?? "");
@@ -142,5 +122,8 @@ export class FaIconPickerModal extends Modal {
     this.listEl = null;
     this.searchInput = null;
     this.files = [];
+    this.selected = null;
+    this.selectedEl = null;
+    this.addButton = null;
   }
 }
