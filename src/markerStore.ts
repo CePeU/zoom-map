@@ -6,8 +6,61 @@ export interface MarkerLayer {
   name: string;
   visible: boolean;
   locked?: boolean;
-  // Optional: Layer an ein Base binden – beim Base-Wechsel automatisch (un)sichtbar
   boundBase?: string;
+}
+
+export interface DrawLayer {
+  id: string;
+  name: string;
+  visible: boolean;
+  locked?: boolean;
+  boundBase?: string;
+}
+
+export type DrawingKind = "polygon" | "rect" | "circle";
+
+export type FillPatternKind = "none" | "solid" | "striped" | "cross" | "wavy";
+
+export interface DrawingStyle {
+  // Stroke
+  strokeColor: string;
+  strokeWidth: number;
+  strokeDash?: number[];
+  strokeOpacity?: number;          // 0–1, optional
+
+  // Fill (background / base color)
+  fillColor?: string;
+  fillOpacity?: number;            // 0–1, optional
+
+  // Pattern fill on top of the base fill
+  fillPattern?: FillPatternKind;   // "none" | "solid" | "striped" | "cross" | "wavy"
+  fillPatternAngle?: number;       // degrees, e.g. 45
+  fillPatternSpacing?: number;     // pattern cell size in px, e.g. 8–16
+  fillPatternStrokeWidth?: number; // line thickness inside the pattern
+  fillPatternOpacity?: number;     // 0–1 transparency for pattern strokes
+
+  // Optional label
+  label?: string;
+}
+
+export interface Drawing {
+  id: string;
+  layerId: string;
+  kind: DrawingKind;
+  visible: boolean;
+
+  rect?: { x0: number; y0: number; x1: number; y1: number };
+  circle?: { cx: number; cy: number; r: number };
+  polygon?: { x: number; y: number }[];
+
+  style: DrawingStyle;
+
+  /** Legacy: data URL baked in memory (prototyp, kann später entfernt werden) */
+  bakedSvg?: string;
+
+  bakedPath?: string;
+  bakedWidth?: number;
+  bakedHeight?: number;
 }
 
 export type MarkerKind = "pin" | "sticker";
@@ -90,24 +143,24 @@ export interface MeasurementConfig {
 }
 
 export interface MarkerFileData {
-  image: string; // active base image (back-compat)
-  size?: { w: number; h: number }; // image size in pixels
+  image: string;
+  size?: { w: number; h: number };
   layers: MarkerLayer[];
   markers: Marker[];
 
-  // Image layers
   bases?: (string | BaseImage)[];
   overlays?: ImageOverlay[];
   activeBase?: string;
 
-  // Ruler / scale
   measurement?: MeasurementConfig;
 
-  // Saved frame (viewport) size in pixels
   frame?: { w: number; h: number };
-  
+
   pinSizeOverrides?: Record<string, number>;
   panClamp?: boolean;
+
+  drawLayers?: DrawLayer[];
+  drawings?: Drawing[];
 }
 
 export function generateId(prefix = "m"): string {
@@ -131,88 +184,100 @@ export class MarkerStore {
   }
 
   async ensureExists(
-    initialImagePath?: string,
-    size?: { w: number; h: number },
-  ): Promise<void> {
-    const abs = this.getFileByPath(this.markersFilePath);
-    if (abs) return;
+  initialImagePath?: string,
+  size?: { w: number; h: number },
+): Promise<void> {
+  const abs = this.getFileByPath(this.markersFilePath);
+  if (abs) return;
 
-    const data: MarkerFileData = {
-      image: initialImagePath ?? "",
-      size,
-      layers: [{ id: "default", name: "Default", visible: true, locked: false }],
-      markers: [],
-      bases: initialImagePath ? [initialImagePath] : [],
-      overlays: [],
-      activeBase: initialImagePath ?? "",
-      measurement: {
-        displayUnit: "auto-metric",
-        metersPerPixel: undefined,
-        scales: {},
-		customUnitId: undefined,
-      },
-      frame: undefined,
-      pinSizeOverrides: {},
-      panClamp: true,
-    };
-
-    await this.create(JSON.stringify(data, null, 2));
-    new Notice(`Created marker file: ${this.markersFilePath}`, 2500);
-  }
-
-  async load(): Promise<MarkerFileData> {
-    const f = this.getFileByPath(this.markersFilePath);
-    if (!f) throw new Error(`Marker file missing: ${this.markersFilePath}`);
-
-    const raw = await this.app.vault.read(f);
-    const parsed = JSON.parse(raw) as MarkerFileData;
-
-    // Defaults / Back-Compat
-    if (!parsed.layers || parsed.layers.length === 0) {
-      parsed.layers = [{ id: "default", name: "Default", visible: true, locked: false }];
-    }
-
-    // Layer-Fields
-    parsed.layers = parsed.layers.map((l) => ({
-      id: l.id,
-      name: l.name ?? "Layer",
-      visible: typeof l.visible === "boolean" ? l.visible : true,
-      locked: !!l.locked,
-      boundBase: typeof l.boundBase === "string" && l.boundBase.trim() ? l.boundBase : undefined,
-    }));
-
-    parsed.markers ??= [];
-
-    parsed.bases ??= parsed.image ? [parsed.image] : [];
-
-    if (!parsed.activeBase) {
-      const firstBase = parsed.bases[0];
-      const firstPath =
-        typeof firstBase === "string"
-          ? firstBase
-          : isBaseImage(firstBase)
-          ? firstBase.path
-          : "";
-      parsed.activeBase = parsed.image || firstPath || "";
-    }
-
-    parsed.overlays ??= [];
-
-    parsed.measurement ??= {
+  const data: MarkerFileData = {
+    image: initialImagePath ?? "",
+    size,
+    layers: [{ id: "default", name: "Default", visible: true, locked: false }],
+    markers: [],
+    bases: initialImagePath ? [initialImagePath] : [],
+    overlays: [],
+    activeBase: initialImagePath ?? "",
+    measurement: {
       displayUnit: "auto-metric",
       metersPerPixel: undefined,
       scales: {},
-    };
-    parsed.measurement.scales ??= {};
-    parsed.measurement.displayUnit ??= "auto-metric";
+      customUnitId: undefined,
+    },
+    frame: undefined,
+    pinSizeOverrides: {},
+    panClamp: true,
 
-    // Per-map pin size overrides
-    parsed.pinSizeOverrides ??= {};
-    if (typeof parsed.panClamp !== "boolean") {
-      parsed.panClamp = true;
-    }
+    drawLayers: [],
+    drawings: [],
+  };
 
-    return parsed;
+  await this.create(JSON.stringify(data, null, 2));
+  new Notice(`Created marker file: ${this.markersFilePath}`, 2500);
+}
+
+  async load(): Promise<MarkerFileData> {
+  const f = this.getFileByPath(this.markersFilePath);
+  if (!f) throw new Error(`Marker file missing: ${this.markersFilePath}`);
+
+  const raw = await this.app.vault.read(f);
+  const parsed = JSON.parse(raw) as MarkerFileData;
+
+  // Defaults / back-compat
+  if (!parsed.layers || parsed.layers.length === 0) {
+    parsed.layers = [
+      { id: "default", name: "Default", visible: true, locked: false },
+    ];
+  }
+
+  // Normalize layer fields
+  parsed.layers = parsed.layers.map((l) => ({
+    id: l.id,
+    name: l.name ?? "Layer",
+    visible: typeof l.visible === "boolean" ? l.visible : true,
+    locked: !!l.locked,
+    boundBase:
+      typeof l.boundBase === "string" && l.boundBase.trim()
+        ? l.boundBase
+        : undefined,
+  }));
+
+  parsed.markers ??= [];
+
+  parsed.bases ??= parsed.image ? [parsed.image] : [];
+
+  if (!parsed.activeBase) {
+    const firstBase = parsed.bases[0];
+    const firstPath =
+      typeof firstBase === "string"
+        ? firstBase
+        : isBaseImage(firstBase)
+        ? firstBase.path
+        : "";
+    parsed.activeBase = parsed.image || firstPath || "";
+  }
+
+  parsed.overlays ??= [];
+
+  parsed.measurement ??= {
+    displayUnit: "auto-metric",
+    metersPerPixel: undefined,
+    scales: {},
+  };
+  parsed.measurement.scales ??= {};
+  parsed.measurement.displayUnit ??= "auto-metric";
+
+  // Per-map pin size overrides
+  parsed.pinSizeOverrides ??= {};
+  if (typeof parsed.panClamp !== "boolean") {
+    parsed.panClamp = true;
+  }
+
+  // Drawing layers and drawings
+  parsed.drawLayers ??= [];
+  parsed.drawings ??= [];
+
+  return parsed;
   }
 
   async save(data: MarkerFileData): Promise<void> {

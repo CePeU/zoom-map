@@ -27,6 +27,18 @@ export class PreferencesModal extends Modal {
           });
       });
 
+    new Setting(contentEl)
+      .setName("Enable drawing tools")
+      .setDesc("When enabled, the draw menu and draw layers become available on maps.")
+      .addToggle((toggle) => {
+        toggle
+          .setValue(!!this.plugin.settings.enableDrawing)
+          .onChange(async (value) => {
+            this.plugin.settings.enableDrawing = value;
+            await this.plugin.saveSettings();
+          });
+      });
+
     const footer = contentEl.createDiv({ cls: "zoommap-modal-footer" });
     const closeBtn = footer.createEl("button", { text: "Close" });
     closeBtn.onclick = () => this.close();

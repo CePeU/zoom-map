@@ -7,11 +7,16 @@ import type {
   ImageOverlay,
   BaseImage,
   MarkerLayer,
+  DrawLayer,
+  Drawing,
+  DrawingKind,
+  FillPatternKind,
 } from "./markerStore";
 import type ZoomMapPlugin from "./main";
 import { MarkerEditorModal } from "./markerEditor";
 import { ScaleCalibrateModal } from "./scaleCalibrateModal";
 import { NoteMarkerStore } from "./inlineStore";
+import { DrawingEditorModal } from "./drawingEditorModal";
 import { ImageFileSuggestModal } from "./iconFileSuggest";
 import { NamePromptModal } from "./namePrompt";
 import { RenameLayerModal, DeleteLayerModal } from "./layerManageModals";
@@ -79,7 +84,7 @@ export interface ZoomMapConfig {
   heightFromYaml?: boolean;
   storageMode?: "json" | "note";
   mapId?: string;
-  responsive?: boolean; // width 100%, height via aspect ratio; disables wheel/dblclick/pinch pan/zoom
+  responsive?: boolean;
 }
 
 export interface IconProfile {
@@ -89,6 +94,7 @@ export interface IconProfile {
   anchorX: number;
   anchorY: number;
   defaultLink?: string;
+  rotationDeg?: number;
 }
 
 export interface CustomUnitDef {
@@ -105,8 +111,8 @@ export interface ZoomMapSettings {
   panMouseButton: "left" | "middle";
   hoverMaxWidth: number;
   hoverMaxHeight: number;
-  presets?: MarkerPreset[];         // legacy
-  stickerPresets?: StickerPreset[]; // legacy
+  presets?: MarkerPreset[];
+  stickerPresets?: StickerPreset[];
   defaultWidth: string;
   defaultHeight: string;
   defaultResizable: boolean;
@@ -119,6 +125,7 @@ export interface ZoomMapSettings {
   pinPlaceOpensEditor?: boolean;
   customUnits?: CustomUnitDef[];
   defaultScaleLikeSticker?: boolean;
+  enableDrawing?: boolean;
 }
 
 interface Point { x: number; y: number; }
@@ -188,6 +195,13 @@ export class MapInstance extends Component {
   private calibPath!: SVGPathElement;
   private calibDots!: SVGGElement;
   private measureHud!: HTMLDivElement;
+  
+  // Draw overlay (static shapes + draft)
+  private drawEl!: HTMLDivElement;
+  private drawSvg!: SVGSVGElement;
+  private drawDefs!: SVGDefsElement;
+  private drawStaticLayer!: SVGGElement;
+  private drawDraftLayer!: SVGGElement;
 
   private zoomHud!: HTMLDivElement;
   private zoomHudTimer: number | null = null;
@@ -243,6 +257,13 @@ export class MapInstance extends Component {
   private calibrating = false;
   private calibPts: Point[] = [];
   private calibPreview: Point | null = null;
+  
+  // Drawing state
+  private drawingMode: DrawingKind | null = null;
+  private drawingActiveLayerId: string | null = null;
+  private drawRectStart: Point | null = null;
+  private drawCircleCenter: Point | null = null;
+  private drawPolygonPoints: Point[] = [];
 
   private panRAF: number | null = null;
   private panAccDx = 0;
@@ -276,6 +297,63 @@ export class MapInstance extends Component {
       this.store = new NoteMarkerStore(app, cfg.sourcePath, id, this.cfg.sectionEnd);
     } else {
       this.store = new MarkerStore(app, cfg.sourcePath, cfg.markersPath);
+    }
+  }
+  
+  private startDraw(kind: DrawingKind): void {
+    if (!this.plugin.settings.enableDrawing) {
+      new Notice("Drawing tools are disabled in the plugin preferences.", 2000);
+      return;
+    }
+    if (!this.data) return;
+
+    const layers = this.data.drawLayers ?? [];
+    const visible = layers.find((l) => l.visible);
+
+    if (layers.length === 0) {
+      new Notice(
+        "No draw layers exist yet. Create one under image layers → draw layers → add draw layer…",
+        6000,
+      );
+      return;
+    }
+
+    if (!visible) {
+      new Notice(
+        "No draw layer is active. Enable a draw layer under image layers → draw layers.",
+        6000,
+      );
+      return;
+    }
+
+    this.drawingMode = kind;
+    this.drawingActiveLayerId = visible.id;
+    this.drawRectStart = null;
+    this.drawCircleCenter = null;
+    this.drawPolygonPoints = [];
+
+    this.measuring = false;
+    this.calibrating = false;
+
+    if (this.drawDraftLayer) {
+      this.drawDraftLayer.innerHTML = "";
+    }
+
+    if (kind === "rect") {
+      new Notice(
+        "Draw rectangle: click start point, move the mouse, click end point. Press esc to cancel.",
+        5000,
+      );
+    } else if (kind === "circle") {
+      new Notice(
+        "Draw circle: click center, move the mouse, click radius point. Press esc to cancel.",
+        5000,
+      );
+    } else if (kind === "polygon") {
+      new Notice(
+        "Draw polygon: click to add points, move the mouse for preview, double-click or right-click to finish. Press esc to cancel.",
+        7000,
+      );
     }
   }
 
@@ -407,6 +485,18 @@ export class MapInstance extends Component {
 
     this.registerDomEvent(window, "keydown", (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
+
+      if (this.drawingMode) {
+        this.drawingMode = null;
+        this.drawingActiveLayerId = null;
+        this.drawRectStart = null;
+        this.drawCircleCenter = null;
+        this.drawPolygonPoints = [];
+        if (this.drawDraftLayer) this.drawDraftLayer.innerHTML = "";
+        this.closeMenu();
+        return;
+      }
+
       if (this.calibrating) {
         this.calibrating = false;
         this.calibPts = [];
@@ -473,6 +563,7 @@ export class MapInstance extends Component {
 
     await this.applyActiveBaseAndOverlays();
     this.setupMeasureOverlay();
+    this.setupDrawOverlay();
 
     this.applyMeasureStyle();
 
@@ -678,6 +769,27 @@ export class MapInstance extends Component {
     this.measureSvg.appendChild(this.calibDots);
 
     this.updateMeasureHud();
+  }
+  
+  private setupDrawOverlay(): void {
+    const ns = "http://www.w3.org/2000/svg";
+
+    this.drawEl = this.worldEl.createDiv({ cls: "zm-draw" });
+
+    this.drawSvg = document.createElementNS(ns, "svg");
+    this.drawSvg.classList.add("zm-draw__svg");
+    this.drawSvg.setAttribute("width", String(this.imgW));
+    this.drawSvg.setAttribute("height", String(this.imgH));
+    this.drawEl.appendChild(this.drawSvg);
+
+    this.drawDefs = document.createElementNS(ns, "defs");
+    this.drawSvg.appendChild(this.drawDefs);
+
+    this.drawStaticLayer = document.createElementNS(ns, "g");
+    this.drawSvg.appendChild(this.drawStaticLayer);
+
+    this.drawDraftLayer = document.createElementNS(ns, "g");
+    this.drawSvg.appendChild(this.drawDraftLayer);
   }
 
   private renderMeasure(): void {
@@ -934,6 +1046,10 @@ export class MapInstance extends Component {
 
     if (this.activePointers.size === 2) { this.startPinch(); return; }
 
+	if (this.drawingMode) {
+      return;
+    }
+
     if (this.pinchActive) return;
     if (!this.panButtonMatches(e)) return;
 
@@ -943,6 +1059,10 @@ export class MapInstance extends Component {
 
   private onPointerMove(e: PointerEvent): void {
     if (!this.ready) return;
+	
+	if (this.updateDrawPreview(e)) {
+      return;
+    }
 
     if (this.activePointers.has(e.pointerId)) {
       this.activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
@@ -1139,13 +1259,21 @@ export class MapInstance extends Component {
 
   private onDblClickViewport(e: MouseEvent): void {
     if (!this.ready) return;
+
+    if (this.drawingMode === "polygon" && this.drawPolygonPoints.length >= 2) {
+      this.finishPolygonDrawing();
+      return;
+    }
+
     if (this.measuring) {
       this.measuring = false;
       this.measurePreview = null;
       this.updateMeasureHud();
       return;
     }
+
     if (e.target instanceof HTMLElement && e.target.closest(".zm-marker")) return;
+
     const vpRect = this.viewportEl.getBoundingClientRect();
     const cx = e.clientX - vpRect.left;
     const cy = e.clientY - vpRect.top;
@@ -1154,6 +1282,10 @@ export class MapInstance extends Component {
 
     private onClickViewport(e: MouseEvent): void {
     if (!this.ready) return;
+
+    if (this.handleDrawClick(e)) {
+      return;
+    }
 
     if (this.calibrating) {
       const vpRect = this.viewportEl.getBoundingClientRect();
@@ -1358,6 +1490,13 @@ export class MapInstance extends Component {
 private onContextMenuViewport(e: MouseEvent): void {
     if (!this.ready || !this.data) return;
     this.closeMenu();
+
+    if (this.drawingMode === "polygon" && this.drawPolygonPoints.length >= 2) {
+      e.preventDefault();
+      e.stopPropagation();
+      this.finishPolygonDrawing();
+      return;
+    }
 
     const vpRect = this.viewportEl.getBoundingClientRect();
     const vx = e.clientX - vpRect.left;
@@ -1697,9 +1836,109 @@ private onContextMenuViewport(e: MouseEvent): void {
       };
     });
 
+    const drawLayers = this.data.drawLayers ?? [];
+    const drawLayerChildren: ZMMenuItem[] = drawLayers.map((dl) => ({
+      label: dl.name,
+      checked: !!dl.visible,
+      action: (rowEl) => {
+        dl.visible = !dl.visible;
+        void this.saveDataSoon();
+        this.renderDrawings();
+        const chk = rowEl.querySelector<HTMLElement>(".zm-menu__check");
+        if (chk) chk.textContent = dl.visible ? "✓" : "";
+      },
+    }));
+
+    if (this.plugin.settings.enableDrawing) {
+      drawLayerChildren.push(
+        { type: "separator" },
+        {
+          label: "Rename draw layer…",
+          children: drawLayers.map((dl) => ({
+            label: dl.name,
+            action: () => {
+              const baseName = dl.name || "Draw layer";
+              new NamePromptModal(
+                this.app,
+                "Rename draw layer",
+                baseName,
+                (value) => {
+                  const name = (value || baseName).trim() || baseName;
+                  dl.name = name;
+                  void this.saveDataSoon();
+                },
+              ).open();
+            },
+          })),
+        },
+        {
+          label: "Delete draw layer…",
+          children: drawLayers.map((dl) => ({
+            label: dl.name,
+            action: () => {
+              if (!this.data) return;
+              const count = (this.data.drawings ?? []).filter(
+                (d) => d.layerId === dl.id,
+              ).length;
+              const ok = window.confirm(
+                count > 0
+                  ? `Delete draw layer "${dl.name}" and ${count} drawings on it?`
+                  : `Delete draw layer "${dl.name}"?`,
+              );
+              if (!ok) return;
+              this.data.drawLayers = (this.data.drawLayers ?? []).filter(
+                (l) => l.id !== dl.id,
+              );
+              this.data.drawings = (this.data.drawings ?? []).filter(
+                (d) => d.layerId !== dl.id,
+              );
+              void this.saveDataSoon();
+              this.renderDrawings();
+            },
+          })),
+        },
+        {
+          label: "Add draw layer…",
+          action: () => {
+            if (!this.data) return;
+            const baseName = "Draw layer";
+            new NamePromptModal(
+              this.app,
+              "Name for draw layer",
+              baseName,
+              (value) => {
+                if (!this.data) return;
+                const name = (value || baseName).trim() || baseName;
+                const id = generateId("draw");
+                this.data.drawLayers ??= [];
+                this.data.drawLayers.push({
+                  id,
+                  name,
+                  visible: true,
+                  locked: false,
+                });
+                void this.saveDataSoon();
+                this.renderDrawings();
+              },
+            ).open();
+          },
+        },
+      );
+    }
+
     const imageLayersChildren: ZMMenuItem[] = [
       { label: "Base", children: baseItems },
       { label: "Overlays", children: overlayItems },
+    ];
+
+    if (this.plugin.settings.enableDrawing) {
+      imageLayersChildren.push({
+        label: "Draw layers",
+        children: drawLayerChildren,
+      });
+    }
+
+    imageLayersChildren.push(
       { type: "separator" },
       {
         label: "Add layer",
@@ -1708,7 +1947,7 @@ private onContextMenuViewport(e: MouseEvent): void {
           { label: "Overlay…", action: () => this.promptAddLayer("overlay") },
         ],
       },
-    ];
+    );
 
     items.push(
       { type: "separator" },
@@ -1810,6 +2049,38 @@ private onContextMenuViewport(e: MouseEvent): void {
         ],
       },
     );
+	
+	if (this.plugin.settings.enableDrawing) {
+      items.push(
+        { type: "separator" },
+        {
+          label: "Draw",
+          children: [
+            {
+              label: "Rectangle",
+              action: () => {
+                this.startDraw("rect");
+                this.closeMenu();
+              },
+            },
+            {
+              label: "Circle",
+              action: () => {
+                this.startDraw("circle");
+                this.closeMenu();
+              },
+            },
+            {
+			  label: "Polygon",
+			  action: () => {
+				this.startDraw("polygon");
+				this.closeMenu();
+			  },
+			},
+          ],
+        },
+      );
+    }
 
     items.push(
       { type: "separator" },
@@ -1826,12 +2097,15 @@ private onContextMenuViewport(e: MouseEvent): void {
           {
             label: "Allow panning beyond image",
             checked: !(this.data?.panClamp ?? true),
-            action: async () => {
+            action: async (rowEl) => {
               if (!this.data) return;
               const current = this.data.panClamp ?? true;
               this.data.panClamp = !current;
               await this.saveDataSoon();
               this.applyTransform(this.scale, this.tx, this.ty);
+
+              const chk = rowEl.querySelector<HTMLElement>(".zm-menu__check");
+              if (chk) chk.textContent = this.data.panClamp ? "" : "✓";
             },
           },
         ],
@@ -2307,6 +2581,7 @@ private onContextMenuViewport(e: MouseEvent): void {
 
     const idx = baseDataUrl.indexOf(",");
     if (idx < 0) return baseDataUrl;
+
     const header = baseDataUrl.slice(0, idx + 1);
     const payload = baseDataUrl.slice(idx + 1);
 
@@ -2321,6 +2596,793 @@ private onContextMenuViewport(e: MouseEvent): void {
     const out = header + encodeURIComponent(tinted);
     this.tintedSvgCache.set(key, out);
     return out;
+  }
+  
+  private renderDrawings(): void {
+    if (!this.drawSvg || !this.drawStaticLayer || !this.drawDefs) return;
+
+    this.drawSvg.setAttribute("width", String(this.imgW));
+    this.drawSvg.setAttribute("height", String(this.imgH));
+
+    while (this.drawStaticLayer.firstChild) {
+      this.drawStaticLayer.removeChild(this.drawStaticLayer.firstChild);
+    }
+    while (this.drawDefs.firstChild) {
+      this.drawDefs.removeChild(this.drawDefs.firstChild);
+    }
+
+    if (
+      !this.data ||
+      !Array.isArray(this.data.drawings) ||
+      this.data.drawings.length === 0
+    ) {
+      return;
+    }
+
+    const visibleDrawLayers = new Set(
+      (this.data.drawLayers ?? [])
+        .filter((l) => l.visible)
+        .map((l) => l.id),
+    );
+
+    const toAbs = (nx: number, ny: number) => ({
+      x: nx * this.imgW,
+      y: ny * this.imgH,
+    });
+
+    const ns = "http://www.w3.org/2000/svg";
+
+    for (const d of this.data.drawings) {
+      if (!d.visible) continue;
+      if (!visibleDrawLayers.has(d.layerId)) continue;
+
+      const style = d.style ?? {};
+
+      let shape: SVGElement | null = null;
+      let minX = 0;
+      let minY = 0;
+      let width = 0;
+      let height = 0;
+
+      if (d.kind === "circle" && d.circle) {
+        const { cx, cy, r } = d.circle;
+        const c = toAbs(cx, cy);
+        const radius = r * Math.max(this.imgW, this.imgH);
+
+        minX = c.x - radius;
+        minY = c.y - radius;
+        width = radius * 2;
+        height = radius * 2;
+
+        const circ = document.createElementNS(ns, "circle");
+        circ.setAttribute("cx", String(c.x));
+        circ.setAttribute("cy", String(c.y));
+        circ.setAttribute("r", String(radius));
+        shape = circ;
+      } else if (d.kind === "rect" && d.rect) {
+        const { x0, y0, x1, y1 } = d.rect;
+        const a = toAbs(x0, y0);
+        const b = toAbs(x1, y1);
+        const x = Math.min(a.x, b.x);
+        const y = Math.min(a.y, b.y);
+        const w = Math.abs(a.x - b.x);
+        const h = Math.abs(a.y - b.y);
+
+        minX = x;
+        minY = y;
+        width = w;
+        height = h;
+
+        const rEl = document.createElementNS(ns, "rect");
+        rEl.setAttribute("x", String(x));
+        rEl.setAttribute("y", String(y));
+        rEl.setAttribute("width", String(w));
+        rEl.setAttribute("height", String(h));
+        shape = rEl;
+      } else if (d.kind === "polygon" && d.polygon && d.polygon.length >= 2) {
+        const path = document.createElementNS(ns, "path");
+        let dAttr = "";
+        let minPx = Infinity;
+        let minPy = Infinity;
+        let maxPx = -Infinity;
+        let maxPy = -Infinity;
+
+        d.polygon.forEach((p, idx) => {
+          const a = toAbs(p.x, p.y);
+          dAttr += idx === 0 ? `M ${a.x} ${a.y}` : ` L ${a.x} ${a.y}`;
+          minPx = Math.min(minPx, a.x);
+          maxPx = Math.max(maxPx, a.x);
+          minPy = Math.min(minPy, a.y);
+          maxPy = Math.max(maxPy, a.y);
+        });
+        dAttr += " Z";
+        path.setAttribute("d", dAttr);
+        shape = path;
+
+        if (
+          Number.isFinite(minPx) &&
+          Number.isFinite(maxPx) &&
+          Number.isFinite(minPy) &&
+          Number.isFinite(maxPy)
+        ) {
+          minX = minPx;
+          minY = minPy;
+          width = maxPx - minPx;
+          height = maxPy - minPy;
+        }
+      }
+
+      if (!shape || width <= 0 || height <= 0) continue;
+
+      const handleCtx = (ev: MouseEvent) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        this.onDrawingContextMenu(ev, d);
+      };
+
+      const patternKind: FillPatternKind =
+        style.fillPattern ?? (style.fillColor ? "solid" : "none");
+
+      if (
+        patternKind === "striped" ||
+        patternKind === "cross" ||
+        patternKind === "wavy"
+      ) {
+        const af = d.bakedPath
+          ? this.app.vault.getAbstractFileByPath(d.bakedPath)
+          : null;
+        if (!d.bakedPath || !(af instanceof TFile)) {
+          void this.bakePatternSvgToFile(d, {
+            minX,
+            minY,
+            width,
+            height,
+          });
+        }
+      }
+
+      let patternHref: string | null = null;
+
+      if (
+        patternKind === "striped" ||
+        patternKind === "cross" ||
+        patternKind === "wavy"
+      ) {
+        if (d.bakedPath) {
+          const af = this.app.vault.getAbstractFileByPath(d.bakedPath);
+          if (af instanceof TFile) {
+            const url = this.app.vault.getResourcePath(af);
+            patternHref = url;
+            console.log("ZoomMap: using baked SVG file", {
+              id: d.id,
+              bakedPath: d.bakedPath,
+              url,
+            });
+          } else {
+            console.warn("ZoomMap: baked SVG file not found", {
+              id: d.id,
+              bakedPath: d.bakedPath,
+            });
+          }
+        }
+      }
+
+      if (patternHref) {
+        const img = document.createElementNS(ns, "image");
+        img.setAttribute("href", patternHref);
+        img.setAttribute("x", String(minX));
+        img.setAttribute("y", String(minY));
+        img.setAttribute("width", String(width));
+        img.setAttribute("height", String(height));
+        img.classList.add("zm-draw__shape");
+        img.dataset.id = d.id;
+        img.addEventListener("contextmenu", handleCtx);
+        this.drawStaticLayer.appendChild(img);
+      } else if (patternKind !== "none") {
+        const fillColor = style.fillColor ?? "none";
+        const fillOp =
+          typeof style.fillOpacity === "number"
+            ? Math.min(Math.max(style.fillOpacity, 0), 1)
+            : 0.15;
+
+        const fillShape = shape.cloneNode(false) as SVGElement;
+        fillShape.classList.add("zm-draw__shape");
+        fillShape.dataset.id = d.id;
+        fillShape.setAttribute("fill", fillColor);
+        fillShape.setAttribute("fill-opacity", String(fillOp));
+        fillShape.setAttribute("stroke", "none");
+        fillShape.addEventListener("contextmenu", handleCtx);
+        this.drawStaticLayer.appendChild(fillShape);
+      }
+
+
+      const strokeColor =
+        (style.strokeColor ?? "#ff0000").trim() || "#ff0000";
+      const strokeWidth =
+        Number.isFinite(style.strokeWidth) && style.strokeWidth > 0
+          ? style.strokeWidth
+          : 2;
+      const strokeOpacity =
+        typeof style.strokeOpacity === "number"
+          ? Math.min(Math.max(style.strokeOpacity, 0), 1)
+          : 1;
+
+      const outline = shape;
+      outline.classList.add("zm-draw__shape");
+      outline.dataset.id = d.id;
+      outline.setAttribute("fill", "none");
+      outline.setAttribute("stroke", strokeColor);
+      outline.setAttribute("stroke-width", String(strokeWidth));
+      if (strokeOpacity < 1) {
+        outline.setAttribute("stroke-opacity", String(strokeOpacity));
+      } else {
+        outline.removeAttribute("stroke-opacity");
+      }
+
+      if (Array.isArray(style.strokeDash) && style.strokeDash.length > 0) {
+        outline.setAttribute("stroke-dasharray", style.strokeDash.join(" "));
+      } else {
+        outline.removeAttribute("stroke-dasharray");
+      }
+
+      outline.addEventListener("contextmenu", handleCtx);
+      this.drawStaticLayer.appendChild(outline);
+    }
+  }
+  
+  private buildPatternSvgMarkup(
+    d: Drawing,
+    box: { minX: number; minY: number; width: number; height: number },
+  ): string | null {
+    const style = d.style ?? {};
+    const patternKind: FillPatternKind =
+      style.fillPattern ?? (style.fillColor ? "solid" : "none");
+    if (patternKind === "none" || patternKind === "solid") return null;
+
+    const { minX, minY, width, height } = box;
+    const maxX = minX + width;
+    const maxY = minY + height;
+
+    const toAbs = (nx: number, ny: number) => ({
+      x: nx * this.imgW,
+      y: ny * this.imgH,
+    });
+
+
+    let clipBody = "";
+
+    if (d.kind === "circle" && d.circle) {
+      const { cx, cy, r } = d.circle;
+      const c = toAbs(cx, cy);
+      const radius = r * Math.max(this.imgW, this.imgH);
+      clipBody = `<circle cx="${c.x}" cy="${c.y}" r="${radius}" />`;
+    } else if (d.kind === "rect" && d.rect) {
+      const { x0, y0, x1, y1 } = d.rect;
+      const a = toAbs(x0, y0);
+      const b = toAbs(x1, y1);
+      const x = Math.min(a.x, b.x);
+      const y = Math.min(a.y, b.y);
+      const w = Math.abs(a.x - b.x);
+      const h = Math.abs(a.y - b.y);
+      clipBody = `<rect x="${x}" y="${y}" width="${w}" height="${h}" />`;
+    } else if (d.kind === "polygon" && d.polygon && d.polygon.length >= 2) {
+      let pathD = "";
+      d.polygon.forEach((p, idx) => {
+        const a = toAbs(p.x, p.y);
+        pathD += idx === 0 ? `M ${a.x} ${a.y}` : ` L ${a.x} ${a.y}`;
+      });
+      pathD += " Z";
+      clipBody = `<path d="${pathD}" />`;
+    } else {
+      return null;
+    }
+
+    // --- Style-Parameter ---
+
+    const fillColor = style.fillColor ?? "#ff0000";
+    const fillOpacity =
+      typeof style.fillOpacity === "number"
+        ? Math.min(Math.max(style.fillOpacity, 0), 1)
+        : 0.15;
+
+    const spacing =
+      typeof style.fillPatternSpacing === "number" &&
+      style.fillPatternSpacing > 0
+        ? style.fillPatternSpacing
+        : 8;
+
+    const rawAngle =
+      typeof style.fillPatternAngle === "number"
+        ? style.fillPatternAngle
+        : 45;
+    const angle = ((rawAngle % 360) + 360) % 360;
+
+    const strokeWidth =
+      typeof style.fillPatternStrokeWidth === "number" &&
+      style.fillPatternStrokeWidth > 0
+        ? style.fillPatternStrokeWidth
+        : 1;
+
+    const patternOpacity =
+      typeof style.fillPatternOpacity === "number"
+        ? Math.min(Math.max(style.fillPatternOpacity, 0), 1)
+        : fillOpacity;
+
+    const centerX = minX + width / 2;
+    const centerY = minY + height / 2;
+
+
+    let stripeContent = "";
+
+    if (patternKind === "striped" || patternKind === "wavy") {
+      for (let x = minX - width; x <= maxX + width; x += spacing) {
+        if (patternKind === "striped") {
+          const xf = x.toFixed(2);
+          stripeContent += `<line x1="${xf}" y1="${(minY - height).toFixed(
+            2,
+          )}" x2="${xf}" y2="${(maxY + height).toFixed(2)}" />`;
+        } else {
+          const xf = x.toFixed(2);
+          const amp = height / 6;
+          const segments = 8;
+          let dPath = `M ${xf} ${minY.toFixed(2)}`;
+          for (let i = 1; i <= segments; i += 1) {
+            const t = i / segments;
+            const y = minY + t * height;
+            const midY = minY + (t - 0.5 / segments) * height;
+            const dir = i % 2 === 0 ? -1 : 1;
+            const ctrlX = x + dir * amp;
+            dPath += ` C ${ctrlX.toFixed(2)} ${midY.toFixed(
+              2,
+            )} ${ctrlX.toFixed(2)} ${midY.toFixed(2)} ${xf} ${y.toFixed(2)}`;
+          }
+          stripeContent += `<path d="${dPath}" />`;
+        }
+      }
+    } else if (patternKind === "cross") {
+      for (let x = minX - width; x <= maxX + width; x += spacing) {
+        const xf = x.toFixed(2);
+        stripeContent += `<line x1="${xf}" y1="${(minY - height).toFixed(
+          2,
+        )}" x2="${xf}" y2="${(maxY + height).toFixed(2)}" />`;
+      }
+      for (let y = minY - height; y <= maxY + height; y += spacing) {
+        const yf = y.toFixed(2);
+        stripeContent += `<line x1="${(minX - width).toFixed(
+          2,
+        )}" y1="${yf}" x2="${(maxX + width).toFixed(2)}" y2="${yf}" />`;
+      }
+    }
+
+    const svg = `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg"
+     width="${width}" height="${height}"
+     viewBox="${minX} ${minY} ${width} ${height}">
+  <defs>
+    <clipPath id="clip">
+      ${clipBody}
+    </clipPath>
+  </defs>
+  <g clip-path="url(#clip)">
+    <rect x="${minX}" y="${minY}" width="${width}" height="${height}"
+          fill="${fillColor}" fill-opacity="${fillOpacity}" />
+    <g stroke="${fillColor}"
+       stroke-width="${strokeWidth}"
+       stroke-opacity="${patternOpacity}"
+       fill="none"
+       transform="rotate(${angle} ${centerX} ${centerY})">
+      ${stripeContent}
+    </g>
+  </g>
+</svg>`;
+
+    return svg;
+  }
+
+  private async bakePatternSvgToFile(
+    d: Drawing,
+    box: { minX: number; minY: number; width: number; height: number },
+  ): Promise<void> {
+    const svg = this.buildPatternSvgMarkup(d, box);
+    if (!svg) return;
+
+    const vault = this.app.vault;
+    const folder = "ZoomMap/draw-overlays";
+    if (!vault.getAbstractFileByPath(folder)) {
+      await vault.createFolder(folder);
+    }
+
+    const mapId =
+      this.cfg.mapId ??
+      this.cfg.sourcePath
+        .replace(/[\\/]/g, "_")
+        .replace(/[^\w.-]/g, "_");
+
+    const fileName = `${mapId}-${d.id}.svg`;
+    const fullPath = `${folder}/${fileName}`;
+
+    const existing = vault.getAbstractFileByPath(fullPath);
+    if (existing instanceof TFile) {
+      await vault.modify(existing, svg);
+    } else {
+      await vault.create(fullPath, svg);
+    }
+
+    d.bakedPath = fullPath;
+    d.bakedWidth = box.width;
+    d.bakedHeight = box.height;
+
+    await this.saveDataSoon();
+
+    // Trigger a second render so the newly baked pattern becomes visible immediately
+    if (this.ready) {
+      this.renderDrawings();
+    }
+  }
+  
+  private async deleteDrawing(d: Drawing): Promise<void> {
+  if (!this.data) return;
+
+  // Remove baked SVG file if it exists
+  if (d.bakedPath) {
+    const af = this.app.vault.getAbstractFileByPath(d.bakedPath);
+    if (af instanceof TFile) {
+        try {
+          await this.app.fileManager.trashFile(af, true);
+        } catch (err) {
+          console.error("Zoom Map: failed to delete baked SVG", d.bakedPath, err);
+        }
+      }
+  }
+
+  this.data.drawings = (this.data.drawings ?? []).filter((x) => x.id !== d.id);
+  await this.saveDataSoon();
+  this.renderDrawings();
+  new Notice("Drawing deleted.", 900);
+}
+
+  private onDrawingContextMenu(ev: MouseEvent, d: Drawing): void {
+    this.closeMenu();
+
+    const items: ZMMenuItem[] = [
+    {
+      label: "Edit drawing…",
+      action: () => {
+        this.closeMenu();
+        if (!this.data) return;
+        const modal = new DrawingEditorModal(this.app, d, (res) => {
+          if (!this.data) return;
+          if (res.action === "save" && res.drawing) {
+            const updated = res.drawing;
+            const idx = (this.data.drawings ?? []).findIndex(
+              (x) => x.id === d.id,
+            );
+            if (idx >= 0 && this.data.drawings) {
+              this.data.drawings[idx].style = updated.style;
+              this.data.drawings[idx].visible = updated.visible;
+              this.data.drawings[idx].rect = updated.rect;
+              this.data.drawings[idx].circle = updated.circle;
+              this.data.drawings[idx].polygon = updated.polygon;
+
+              delete this.data.drawings[idx].bakedPath;
+              delete this.data.drawings[idx].bakedWidth;
+              delete this.data.drawings[idx].bakedHeight;
+            }
+            void this.saveDataSoon();
+            this.renderDrawings();
+          } else if (res.action === "delete") {
+            void this.deleteDrawing(d);
+          }
+        });
+        modal.open();
+      },
+    },
+    {
+      label: "Delete drawing",
+      action: () => {
+        void this.deleteDrawing(d);
+      },
+    },
+  ];
+
+    this.openMenu = new ZMMenu();
+    this.openMenu.open(ev.clientX, ev.clientY, items);
+
+    const outside = (event: Event) => {
+      if (!this.openMenu) return;
+      const t = event.target;
+      if (t instanceof HTMLElement && this.openMenu.contains(t)) return;
+      this.closeMenu();
+    };
+    const keyClose = (event: KeyboardEvent) => {
+      if (event.key === "Escape") this.closeMenu();
+    };
+    const rightClickClose = () => this.closeMenu();
+
+    document.addEventListener("pointerdown", outside, { capture: true });
+    document.addEventListener("contextmenu", rightClickClose, { capture: true });
+    document.addEventListener("keydown", keyClose, { capture: true });
+
+    this.register(() => {
+      document.removeEventListener("pointerdown", outside, true);
+      document.removeEventListener("contextmenu", rightClickClose, true);
+      document.removeEventListener("keydown", keyClose, true);
+    });
+  }
+  
+  private getOrCreateDefaultDrawLayer(): DrawLayer {
+    if (!this.data) {
+      throw new Error("No marker data loaded");
+    }
+    this.data.drawLayers ??= [];
+    let layer =
+      this.data.drawLayers.find((l) => l.visible) ??
+      this.data.drawLayers[0];
+    if (!layer) {
+      layer = {
+        id: generateId("draw"),
+        name: "Draw",
+        visible: true,
+        locked: false,
+      };
+      this.data.drawLayers.push(layer);
+    }
+    return layer;
+  }
+
+  private handleDrawClick(e: MouseEvent): boolean {
+    if (!this.drawingMode) return false;
+    if (!this.data) return false;
+
+    const vpRect = this.viewportEl.getBoundingClientRect();
+    const vx = e.clientX - vpRect.left;
+    const vy = e.clientY - vpRect.top;
+    const wx = (vx - this.tx) / this.scale;
+    const wy = (vy - this.ty) / this.scale;
+    const nx = clamp(wx / this.imgW, 0, 1);
+    const ny = clamp(wy / this.imgH, 0, 1);
+
+    const layerId =
+      this.drawingActiveLayerId ??
+      this.getOrCreateDefaultDrawLayer().id;
+
+    // Polygon: ignore second click of a double-click (detail > 1).
+    if (this.drawingMode === "polygon" && e.detail > 1) {
+      return true;
+    }
+
+    if (this.drawingMode === "rect") {
+      if (!this.drawRectStart) {
+        this.drawRectStart = { x: nx, y: ny };
+        return true;
+      }
+
+      const start = this.drawRectStart;
+
+      const draft: Drawing = {
+        id: generateId("draw"),
+        layerId,
+        kind: "rect",
+        visible: true,
+        rect: { x0: start.x, y0: start.y, x1: nx, y1: ny },
+        style: {
+          strokeColor: "#ff0000",
+          strokeWidth: 2,
+          fillColor: "#ff0000",
+          fillOpacity: 0.15,
+        },
+      };
+
+      this.drawingMode = null;
+      this.drawingActiveLayerId = null;
+      this.drawRectStart = null;
+      this.drawCircleCenter = null;
+      this.drawPolygonPoints = [];
+      if (this.drawDraftLayer) {
+        this.drawDraftLayer.innerHTML = "";
+      }
+
+      const modal = new DrawingEditorModal(this.app, draft, (res) => {
+        if (!this.data) return;
+        if (res.action === "save" && res.drawing) {
+          this.data.drawings ??= [];
+          this.data.drawings.push(res.drawing);
+          void this.saveDataSoon();
+          this.renderDrawings();
+        }
+      });
+      modal.open();
+
+      return true;
+    }
+
+    if (this.drawingMode === "circle") {
+      if (!this.drawCircleCenter) {
+        this.drawCircleCenter = { x: nx, y: ny };
+        return true;
+      }
+
+      const center = this.drawCircleCenter;
+      const radiusNorm = Math.hypot(nx - center.x, ny - center.y);
+
+      const draft: Drawing = {
+        id: generateId("draw"),
+        layerId,
+        kind: "circle",
+        visible: true,
+        circle: { cx: center.x, cy: center.y, r: radiusNorm },
+        style: {
+          strokeColor: "#ff0000",
+          strokeWidth: 2,
+          fillColor: "#ff0000",
+          fillOpacity: 0.15,
+        },
+      };
+
+      this.drawingMode = null;
+      this.drawingActiveLayerId = null;
+      this.drawRectStart = null;
+      this.drawCircleCenter = null;
+      this.drawPolygonPoints = [];
+      if (this.drawDraftLayer) {
+        this.drawDraftLayer.innerHTML = "";
+      }
+
+      const modal = new DrawingEditorModal(this.app, draft, (res) => {
+        if (!this.data) return;
+        if (res.action === "save" && res.drawing) {
+          this.data.drawings ??= [];
+          this.data.drawings.push(res.drawing);
+          void this.saveDataSoon();
+          this.renderDrawings();
+        }
+      });
+      modal.open();
+
+      return true;
+    }
+
+    if (this.drawingMode === "polygon") {
+      this.drawPolygonPoints.push({ x: nx, y: ny });
+      return true;
+    }
+
+    return false;
+  }
+  
+  private finishPolygonDrawing(): void {
+    if (!this.drawingMode || this.drawingMode !== "polygon") return;
+    if (!this.data) return;
+    if (this.drawPolygonPoints.length < 2) return;
+
+    const layerId =
+      this.drawingActiveLayerId ??
+      this.getOrCreateDefaultDrawLayer().id;
+
+    const points = [...this.drawPolygonPoints];
+
+    const draft: Drawing = {
+      id: generateId("draw"),
+      layerId,
+      kind: "polygon",
+      visible: true,
+      polygon: points,
+      style: {
+        strokeColor: "#ff0000",
+        strokeWidth: 2,
+        fillColor: "#ff0000",
+        fillOpacity: 0.15,
+      },
+    };
+
+    this.drawingMode = null;
+    this.drawingActiveLayerId = null;
+    this.drawRectStart = null;
+    this.drawCircleCenter = null;
+    this.drawPolygonPoints = [];
+    if (this.drawDraftLayer) {
+      this.drawDraftLayer.innerHTML = "";
+    }
+
+    const modal = new DrawingEditorModal(this.app, draft, (res) => {
+      if (!this.data) return;
+      if (res.action === "save" && res.drawing) {
+        this.data.drawings ??= [];
+        this.data.drawings.push(res.drawing);
+        void this.saveDataSoon();
+        this.renderDrawings();
+      }
+    });
+    modal.open();
+  }
+  
+  private updateDrawPreview(e: PointerEvent): boolean {
+    if (!this.drawingMode) return false;
+    if (!this.drawDraftLayer) return false;
+
+    const vpRect = this.viewportEl.getBoundingClientRect();
+    const vx = e.clientX - vpRect.left;
+    const vy = e.clientY - vpRect.top;
+    const wx = (vx - this.tx) / this.scale;
+    const wy = (vy - this.ty) / this.scale;
+    const nx = clamp(wx / this.imgW, 0, 1);
+    const ny = clamp(wy / this.imgH, 0, 1);
+
+    this.drawDraftLayer.innerHTML = "";
+
+    if (this.drawingMode === "rect") {
+      if (!this.drawRectStart) return false;
+
+      const start = this.drawRectStart;
+      const x0 = start.x * this.imgW;
+      const y0 = start.y * this.imgH;
+      const x1 = nx * this.imgW;
+      const y1 = ny * this.imgH;
+
+      const x = Math.min(x0, x1);
+      const y = Math.min(y0, y1);
+      const w = Math.abs(x0 - x1);
+      const h = Math.abs(y0 - y1);
+
+      const r = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+      r.setAttribute("x", String(x));
+      r.setAttribute("y", String(y));
+      r.setAttribute("width", String(w));
+      r.setAttribute("height", String(h));
+      r.classList.add("zm-draw__shape");
+      r.setAttribute("stroke", "#ff0000");
+      r.setAttribute("stroke-width", "2");
+      r.setAttribute("fill", "none");
+
+      this.drawDraftLayer.appendChild(r);
+      return true;
+    }
+
+    if (this.drawingMode === "circle") {
+      if (!this.drawCircleCenter) return false;
+
+      const cx = this.drawCircleCenter.x * this.imgW;
+      const cy = this.drawCircleCenter.y * this.imgH;
+      const px = nx * this.imgW;
+      const py = ny * this.imgH;
+      const radius = Math.hypot(px - cx, py - cy);
+
+      const c = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+      c.setAttribute("cx", String(cx));
+      c.setAttribute("cy", String(cy));
+      c.setAttribute("r", String(radius));
+      c.classList.add("zm-draw__shape");
+      c.setAttribute("stroke", "#ff0000");
+      c.setAttribute("stroke-width", "2");
+      c.setAttribute("fill", "none");
+
+      this.drawDraftLayer.appendChild(c);
+      return true;
+    }
+
+    if (this.drawingMode === "polygon") {
+      if (this.drawPolygonPoints.length === 0) return false;
+
+      const all = [...this.drawPolygonPoints, { x: nx, y: ny }];
+
+      const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+      let dAttr = "";
+      all.forEach((p, idx) => {
+        const ax = p.x * this.imgW;
+        const ay = p.y * this.imgH;
+        dAttr += idx === 0 ? `M ${ax} ${ay}` : ` L ${ax} ${ay}`;
+      });
+      path.setAttribute("d", dAttr);
+      path.classList.add("zm-draw__shape");
+      path.setAttribute("stroke", "#ff0000");
+      path.setAttribute("stroke-width", "2");
+      path.setAttribute("fill", "none");
+
+      this.drawDraftLayer.appendChild(path);
+      return true;
+    }
+
+    return false;
   }
   
   private renderAll(): void {
@@ -2338,10 +3400,16 @@ private onContextMenuViewport(e: MouseEvent): void {
       this.measureEl.style.height = `${this.imgH}px`;
     }
 
+    if (this.drawEl) {
+      this.drawEl.style.width = `${this.imgW}px`;
+      this.drawEl.style.height = `${this.imgH}px`;
+    }
+
     this.markersEl.empty();
     this.renderMarkersOnly();
     this.renderMeasure();
     this.renderCalibrate();
+    this.renderDrawings();
 
     if (this.isCanvas()) this.renderCanvas();
   }
@@ -2437,6 +3505,12 @@ private onContextMenuViewport(e: MouseEvent): void {
           icon.style.width = `${info.size}px`;
           icon.style.height = "auto";
           icon.draggable = false;
+		  
+		  if (info.rotationDeg) {
+		    icon.style.transform = `rotate(${info.rotationDeg}deg)`;
+		    icon.style.transformOrigin = "50% 50%";
+		  }
+		  
           anch.appendChild(icon);
         } else if (scaleLike) {
           const anch = host.createDiv({ cls: "zm-marker-anchor" });
@@ -2446,6 +3520,12 @@ private onContextMenuViewport(e: MouseEvent): void {
           icon.style.width = `${info.size}px`;
           icon.style.height = "auto";
           icon.draggable = false;
+		  
+		  if (info.rotationDeg) {
+		    icon.style.transform = `rotate(${info.rotationDeg}deg)`;
+		    icon.style.transformOrigin = "50% 50%";
+		  }
+		  
           anch.appendChild(icon);
         } else {
           const inv = host.createDiv({ cls: "zm-marker-inv" });
@@ -2458,6 +3538,12 @@ private onContextMenuViewport(e: MouseEvent): void {
           icon.style.width = `${info.size}px`;
           icon.style.height = "auto";
           icon.draggable = false;
+		  
+		  if (info.rotationDeg) {
+		    icon.style.transform = `rotate(${info.rotationDeg}deg)`;
+		    icon.style.transformOrigin = "50% 50%";
+		  }
+		  
           anch.appendChild(icon);
         }
       }
@@ -2695,26 +3781,36 @@ private onContextMenuViewport(e: MouseEvent): void {
     }
   }
 
-  private getIconInfo(iconKey?: string): { imgUrl: string; size: number; anchorX: number; anchorY: number } {
-    const key = iconKey ?? this.plugin.settings.defaultIconKey;
-    const profile =
-      this.plugin.settings.icons.find((i) => i.key === key) ?? this.plugin.builtinIcon();
+  private getIconInfo(iconKey?: string): {
+  imgUrl: string;
+  size: number;
+  anchorX: number;
+  anchorY: number;
+  rotationDeg: number;
+} {
+  const key = iconKey ?? this.plugin.settings.defaultIconKey;
+  const profile =
+    this.plugin.settings.icons.find((i) => i.key === key) ??
+    this.plugin.builtinIcon();
 
-    const baseSize = profile.size;
-    const overrideSize = this.data?.pinSizeOverrides?.[key];
-    const size =
-      overrideSize && Number.isFinite(overrideSize) && overrideSize > 0
-        ? overrideSize
-        : baseSize;
+  const baseSize = profile.size;
+  const overrideSize = this.data?.pinSizeOverrides?.[key];
+  const size =
+    overrideSize && Number.isFinite(overrideSize) && overrideSize > 0
+      ? overrideSize
+      : baseSize;
 
-    const imgUrl = this.resolveResourceUrl(profile.pathOrDataUrl);
-    return {
-      imgUrl,
-      size,
-      anchorX: profile.anchorX,
-      anchorY: profile.anchorY,
-    };
-  }
+  const imgUrl = this.resolveResourceUrl(profile.pathOrDataUrl);
+  const rotationDeg = profile.rotationDeg ?? 0;
+
+  return {
+    imgUrl,
+    size,
+    anchorX: profile.anchorX,
+    anchorY: profile.anchorY,
+    rotationDeg,
+  };
+}
   
   private getIconDefaultLink(iconKey?: string): string | undefined {
     const key = iconKey ?? this.plugin.settings.defaultIconKey;

@@ -2,19 +2,6 @@ import { TFile } from "obsidian";
 import type { App } from "obsidian";
 import type { MarkerFileData } from "./markerStore";
 
-/*
-Multiline comment format in Obsidian must NOT close on the same line.
-We wrap the payload like this:
-
-%%
-ZOOMMAP-DATA id=<mapId>
-{ ... JSON ... }
-/ZOOMMAP-DATA
-%%
-
-Everything between the two %% lines is hidden in Reading view.
-*/
-
 export class NoteMarkerStore {
   private app: App;
   private notePath: string;
@@ -32,8 +19,13 @@ export class NoteMarkerStore {
     return this.notePath;
   }
 
-  private headerLine(): string { return `ZOOMMAP-DATA id=${this.mapId}`; }
-  private footerLine(): string { return `/ZOOMMAP-DATA`; }
+  private headerLine(): string {
+    return `ZOOMMAP-DATA id=${this.mapId}`;
+  }
+
+  private footerLine(): string {
+    return `/ZOOMMAP-DATA`;
+  }
 
   private async readNote(): Promise<{ file: TFile; text: string }> {
     const af = this.app.vault.getAbstractFileByPath(this.notePath);
@@ -42,7 +34,12 @@ export class NoteMarkerStore {
     return { file: af, text };
   }
 
-  private findBlock(text: string): { start: number; end: number; jsonStart: number; jsonEnd: number } | null {
+  private findBlock(text: string): {
+    start: number;
+    end: number;
+    jsonStart: number;
+    jsonEnd: number;
+  } | null {
     const header = this.headerLine();
     const footer = this.footerLine();
 
@@ -52,7 +49,6 @@ export class NoteMarkerStore {
     const headerLineStart = text.lastIndexOf("\n", hIdx) + 1;
     const headerLineEnd = text.indexOf("\n", hIdx);
     const headerEnd = headerLineEnd === -1 ? text.length : headerLineEnd;
-
     const jsonStart = headerEnd + 1;
 
     const fIdx = text.indexOf(footer, jsonStart);
@@ -60,11 +56,15 @@ export class NoteMarkerStore {
 
     const footerLineStart = text.lastIndexOf("\n", fIdx) + 1;
     const footerLineEnd = text.indexOf("\n", fIdx);
-    const endExclusive = footerLineEnd === -1 ? text.length : (footerLineEnd + 1);
-
+    const endExclusive = footerLineEnd === -1 ? text.length : footerLineEnd + 1;
     const jsonEnd = footerLineStart - 1;
 
-    return { start: headerLineStart, end: endExclusive, jsonStart, jsonEnd: Math.max(jsonStart, jsonEnd) };
+    return {
+      start: headerLineStart,
+      end: endExclusive,
+      jsonStart,
+      jsonEnd: Math.max(jsonStart, jsonEnd),
+    };
   }
 
   async ensureExists(initialImagePath?: string, size?: { w: number; h: number }): Promise<void> {
@@ -82,31 +82,31 @@ export class NoteMarkerStore {
         displayUnit: "auto-metric",
         metersPerPixel: undefined,
         scales: {},
-		customUnitId: undefined,
+        customUnitId: undefined,
       },
       frame: undefined,
       pinSizeOverrides: {},
       panClamp: true,
+      drawLayers: [],
+      drawings: [],
     };
 
-	const payload = JSON.stringify(data, null, 2);
+    const payload = JSON.stringify(data, null, 2);
     const header = this.headerLine();
     const footer = this.footerLine();
-    const block =
-	`\n%%\n${header}\n${payload}\n${footer}\n%%\n`;
+    const block = `\n%%\n${header}\n${payload}\n${footer}\n%%\n`;
 
-  await this.app.vault.process(file, (text) => {
-    // Wenn schon ein Block existiert, nichts tun
-    if (this.findBlock(text)) return text;
+    await this.app.vault.process(file, (text) => {
+      if (this.findBlock(text)) return text;
 
-    let insertAt = text.length;
-    if (typeof this.insertAfterLine === "number") {
-      const lines = text.split("\n");
-      const before = lines.slice(0, this.insertAfterLine + 1).join("\n");
-      insertAt = before.length;
-    }
-    return text.slice(0, insertAt) + block + text.slice(insertAt);
-  });
+      let insertAt = text.length;
+      if (typeof this.insertAfterLine === "number") {
+        const lines = text.split("\n");
+        const before = lines.slice(0, this.insertAfterLine + 1).join("\n");
+        insertAt = before.length;
+      }
+      return text.slice(0, insertAt) + block + text.slice(insertAt);
+    });
   }
 
   async load(): Promise<MarkerFileData> {
@@ -123,18 +123,16 @@ export class NoteMarkerStore {
     const footer = this.footerLine();
     const payload = JSON.stringify(data, null, 2);
 
-     await this.app.vault.process(file, (text) => {
-    const blk = this.findBlock(text);
-    const replacement =
-	`${header}\n${payload}\n${footer}\n`;
+    await this.app.vault.process(file, (text) => {
+      const blk = this.findBlock(text);
+      const replacement = `${header}\n${payload}\n${footer}\n`;
 
-    if (blk) {
-      return text.slice(0, blk.start) + replacement + text.slice(blk.end);
-    } else {
-      return text +
-	`\n%%\n${header}\n${payload}\n${footer}\n%%\n`;
-    }
-  });
+      if (blk) {
+        return text.slice(0, blk.start) + replacement + text.slice(blk.end);
+      } else {
+        return `${text}\n%%\n${header}\n${payload}\n${footer}\n%%\n`;
+      }
+    });
   }
 
   async wouldChange(data: MarkerFileData): Promise<boolean> {

@@ -94,6 +94,7 @@ const DEFAULT_SETTINGS: ZoomMapSettingsExtended = {
   faFolderPath: "ZoomMap/SVGs",
   customUnits: [],
   defaultScaleLikeSticker: false,
+  enableDrawing: false,
 };
 
 /* ---------------- YAML parsing helpers ---------------- */
@@ -1298,66 +1299,84 @@ class ZoomMapSettingTab extends PluginSettingTab {
 
     // SVG icons table
     const svgIconsHead = containerEl.createDiv({
-      cls: "zm-icons-grid-head zm-grid",
-    });
-    svgIconsHead.createSpan({ text: "Name" });
-    svgIconsHead.createSpan({ text: "Preview / color / link" });
-    svgIconsHead.createSpan({ text: "Size" });
+	  cls: "zm-icons-grid-head zm-grid",
+	});
+	svgIconsHead.createSpan({ text: "Name" });
+	svgIconsHead.createSpan({ text: "Preview / color / link" });
+	svgIconsHead.createSpan({ text: "Size" });
 
-    const headSvgAX = svgIconsHead.createSpan({ cls: "zm-icohead" });
-    const svgAxIco = headSvgAX.createSpan();
-    setIcon(svgAxIco, "anchor");
-    headSvgAX.appendText(" X");
+	const headSvgAX = svgIconsHead.createSpan({ cls: "zm-icohead" });
+	const svgAxIco = headSvgAX.createSpan();
+	setIcon(svgAxIco, "anchor");
+	headSvgAX.appendText(" X");
 
-    const headSvgAY = svgIconsHead.createSpan({ cls: "zm-icohead" });
-    const svgAyIco = headSvgAY.createSpan();
-    setIcon(svgAyIco, "anchor");
-    headSvgAY.appendText(" Y");
+	const headSvgAY = svgIconsHead.createSpan({ cls: "zm-icohead" });
+	const svgAyIco = headSvgAY.createSpan();
+	setIcon(svgAyIco, "anchor");
+	headSvgAY.appendText(" Y");
 
-    const headSvgTrash = svgIconsHead.createSpan();
-    setIcon(headSvgTrash, "trash");
+	svgIconsHead.createSpan({ text: "Angle" });
+
+	const headSvgTrash = svgIconsHead.createSpan();
+	setIcon(headSvgTrash, "trash");
 
     const svgIconsGrid = containerEl.createDiv({
       cls: "zm-icons-grid zm-grid",
     });
 
-    // Add SVG icon button belongs to SVG section
-    new Setting(containerEl)
+    const addSvgSetting = new Setting(containerEl)
       .setName("Add SVG icon")
-      .setDesc("Create a pin icon from an SVG file in the configured folder.")
-      .addButton((b) =>
-        b.setButtonText("Add SVG icon").onClick(() => {
-          const ext = this.plugin.settings as ZoomMapSettingsExtended;
-          const folder = ext.faFolderPath?.trim() || "ZoomMap/SVGs";
+      .setDesc("Create a pin icon from an SVG file in the configured folder.");
 
-          new FaIconPickerModal(this.app, folder, (file: TFile) => {
-            void this.addFontAwesomeIcon(file);
-          }).open();
-        }),
-      );
+    const infoIcon = addSvgSetting.controlEl.createDiv({
+      cls: "zoommap-info-icon",
+    });
+    setIcon(infoIcon, "info");
+    infoIcon.setAttr(
+      "title",
+      "Rendering many SVG files in the picker can cause noticeable delays while all previews are generated. Once the icons are cached, searching and adding should feel much faster.",
+    );
+    infoIcon.style.marginRight = "6px";
+    infoIcon.style.display = "inline-flex";
+    infoIcon.style.alignItems = "center";
+    infoIcon.style.justifyContent = "center";
+    infoIcon.style.cursor = "help";
+
+    addSvgSetting.addButton((b) =>
+      b.setButtonText("Add SVG icon").onClick(() => {
+        const ext = this.plugin.settings as ZoomMapSettingsExtended;
+        const folder = ext.faFolderPath?.trim() || "ZoomMap/SVGs";
+
+        new FaIconPickerModal(this.app, folder, (file: TFile) => {
+          void this.addFontAwesomeIcon(file);
+        }).open();
+      }),
+    );
 
     // Image icons heading
     new Setting(containerEl).setName("Image icons").setHeading();
 
     const imgIconsHead = containerEl.createDiv({
-      cls: "zm-icons-grid-head zm-grid",
-    });
-    imgIconsHead.createSpan({ text: "Name" });
-    imgIconsHead.createSpan({ text: "Path / data:URL + default link" });
-    imgIconsHead.createSpan({ text: "Size" });
+	  cls: "zm-icons-grid-head zm-grid",
+	});
+	imgIconsHead.createSpan({ text: "Name" });
+	imgIconsHead.createSpan({ text: "Path / data:URL + default link" });
+	imgIconsHead.createSpan({ text: "Size" });
 
-    const headImgAX = imgIconsHead.createSpan({ cls: "zm-icohead" });
-    const axIco = headImgAX.createSpan();
-    setIcon(axIco, "anchor");
-    headImgAX.appendText(" X");
+	const headImgAX = imgIconsHead.createSpan({ cls: "zm-icohead" });
+	const axIco = headImgAX.createSpan();
+	setIcon(axIco, "anchor");
+	headImgAX.appendText(" X");
 
-    const headImgAY = imgIconsHead.createSpan({ cls: "zm-icohead" });
-    const ayIco = headImgAY.createSpan();
-    setIcon(ayIco, "anchor");
-    headImgAY.appendText(" Y");
+	const headImgAY = imgIconsHead.createSpan({ cls: "zm-icohead" });
+	const ayIco = headImgAY.createSpan();
+	setIcon(ayIco, "anchor");
+	headImgAY.appendText(" Y");
 
-    const headImgTrash = imgIconsHead.createSpan();
-    setIcon(headImgTrash, "trash");
+	imgIconsHead.createSpan({ text: "Angle" });
+
+	const headImgTrash = imgIconsHead.createSpan();
+	setIcon(headImgTrash, "trash");
 
     const imgIconsGrid = containerEl.createDiv({
       cls: "zm-icons-grid zm-grid",
@@ -1401,6 +1420,18 @@ class ZoomMapSettingTab extends PluginSettingTab {
           img.style.width = "24px";
           img.style.height = "24px";
           img.style.objectFit = "contain";
+		  
+		  const applyRotationPreview = () => {
+		    const deg = icon.rotationDeg ?? 0;
+		    if (deg) {
+			  img.style.transform = `rotate(${deg}deg)`;
+			  img.style.transformOrigin = "50% 50%";
+		    } else {
+			  img.style.transform = "";
+			  img.style.transformOrigin = "";
+		    }
+		  };
+		  applyRotationPreview();
 
           const rawSrc = icon.pathOrDataUrl ?? "";
           const isSvgData =
@@ -1479,11 +1510,10 @@ class ZoomMapSettingTab extends PluginSettingTab {
           });
 
           const linkInput = previewCell.createEl("input", { type: "text" });
-          linkInput.placeholder = "Default link (optional)";
-          linkInput.style.flex = "1 1 45%";
-          linkInput.style.minWidth = "140px";
-          linkInput.style.maxWidth = "260px";
-          linkInput.value = icon.defaultLink ?? "";
+		  linkInput.placeholder = "Default link (optional)";
+		  linkInput.style.width = "14ch";
+		  linkInput.style.minWidth = "0";
+		  linkInput.value = icon.defaultLink ?? "";
           linkInput.oninput = () => {
             icon.defaultLink = linkInput.value.trim() || undefined;
             void this.plugin.saveSettings();
@@ -1531,6 +1561,18 @@ class ZoomMapSettingTab extends PluginSettingTab {
               void this.plugin.saveSettings();
             }
           };
+		  
+		  const angle = row.createEl("input", { type: "number" });
+		  angle.classList.add("zm-num");
+		  angle.value = String(icon.rotationDeg ?? 0);
+		  angle.oninput = () => {
+		    const n = Number(angle.value);
+		    if (!Number.isNaN(n)) {
+			  icon.rotationDeg = n || 0;
+			  void this.plugin.saveSettings();
+			  applyRotationPreview();
+		    }
+		  };
 
           const del = row.createEl("button", { attr: { title: "Delete" } });
           del.classList.add("zm-icon-btn");
@@ -1579,6 +1621,8 @@ class ZoomMapSettingTab extends PluginSettingTab {
 
           const linkInput = pathWrap.createEl("input", { type: "text" });
           linkInput.placeholder = "Default link (optional)";
+		  linkInput.style.width = "18ch";
+		  linkInput.style.minWidth = "0";
           linkInput.value = icon.defaultLink ?? "";
           linkInput.oninput = () => {
             icon.defaultLink = linkInput.value.trim() || undefined;
@@ -1627,6 +1671,17 @@ class ZoomMapSettingTab extends PluginSettingTab {
               void this.plugin.saveSettings();
             }
           };
+		  
+		  const angle = row.createEl("input", { type: "number" });
+	      angle.classList.add("zm-num");
+		  angle.value = String(icon.rotationDeg ?? 0);
+		  angle.oninput = () => {
+		    const n = Number(angle.value);
+		    if (!Number.isNaN(n)) {
+		      icon.rotationDeg = n || 0;
+			  void this.plugin.saveSettings();
+		    }
+		  };
 
           const del = row.createEl("button", { attr: { title: "Delete" } });
           del.classList.add("zm-icon-btn");
