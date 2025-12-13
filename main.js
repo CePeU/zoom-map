@@ -1300,38 +1300,29 @@ var PinSizeEditorModal = class extends import_obsidian9.Modal {
     const info = contentEl.createEl("div", {
       text: "Set per-map sizes for pin icons. Leave the override empty to use the global default size from settings."
     });
-    info.style.marginBottom = "8px";
-    const list = contentEl.createDiv();
-    list.style.display = "flex";
-    list.style.flexDirection = "column";
-    list.style.gap = "6px";
+    info.addClass("zoommap-pin-size-info");
+    const list = contentEl.createDiv({ cls: "zoommap-pin-size-list" });
     for (const row of this.rows) {
-      const r = list.createDiv();
-      r.style.display = "flex";
-      r.style.alignItems = "center";
-      r.style.gap = "8px";
-      const img = r.createEl("img");
+      const r = list.createDiv({ cls: "zoommap-pin-size-row" });
+      const img = r.createEl("img", { cls: "zoommap-pin-size-icon" });
       img.src = row.imgUrl;
-      img.style.width = "18px";
-      img.style.height = "18px";
-      img.style.objectFit = "contain";
-      const keySpan = r.createEl("code", { text: row.iconKey });
-      keySpan.style.minWidth = "0";
-      keySpan.style.whiteSpace = "nowrap";
-      const baseSpan = r.createEl("span", {
-        text: `${row.baseSize}px default`
+      r.createEl("code", { text: row.iconKey, cls: "zoommap-pin-size-key" });
+      r.createEl("span", {
+        text: `${row.baseSize}px default`,
+        cls: "zoommap-pin-size-base"
       });
-      baseSpan.style.fontSize = "11px";
-      baseSpan.style.color = "var(--text-muted)";
-      const overrideInput = r.createEl("input", { type: "number" });
-      overrideInput.style.width = "7ch";
+      const overrideInput = r.createEl("input", {
+        type: "number",
+        cls: "zoommap-pin-size-input"
+      });
       overrideInput.placeholder = String(row.baseSize);
       if (typeof row.override === "number" && row.override > 0 && row.override !== row.baseSize) {
         overrideInput.value = String(row.override);
       }
-      const label = r.createEl("span", { text: "Pixels on this map" });
-      label.style.fontSize = "11px";
-      label.style.color = "var(--text-muted)";
+      r.createEl("span", {
+        text: "Pixels on this map",
+        cls: "zoommap-pin-size-label"
+      });
       this.inputs.set(row.iconKey, overrideInput);
     }
     const footer = contentEl.createDiv({ cls: "zoommap-modal-footer" });
@@ -3180,8 +3171,9 @@ var MapInstance = class extends import_obsidian10.Component {
         }
       );
     }
-    this.openMenu = new ZMMenu();
+    this.openMenu = new ZMMenu(this.el.ownerDocument);
     this.openMenu.open(e.clientX, e.clientY, items);
+    const doc = this.el.ownerDocument;
     const outside = (ev) => {
       if (!this.openMenu) return;
       const t = ev.target;
@@ -3192,13 +3184,13 @@ var MapInstance = class extends import_obsidian10.Component {
       if (ev.key === "Escape") this.closeMenu();
     };
     const rightClickClose = () => this.closeMenu();
-    document.addEventListener("pointerdown", outside, { capture: true });
-    document.addEventListener("contextmenu", rightClickClose, { capture: true });
-    document.addEventListener("keydown", keyClose, { capture: true });
+    doc.addEventListener("pointerdown", outside, { capture: true });
+    doc.addEventListener("contextmenu", rightClickClose, { capture: true });
+    doc.addEventListener("keydown", keyClose, { capture: true });
     this.register(() => {
-      document.removeEventListener("pointerdown", outside, true);
-      document.removeEventListener("contextmenu", rightClickClose, true);
-      document.removeEventListener("keydown", keyClose, true);
+      doc.removeEventListener("pointerdown", outside, true);
+      doc.removeEventListener("contextmenu", rightClickClose, true);
+      doc.removeEventListener("keydown", keyClose, true);
     });
   }
   closeMenu() {
@@ -3949,7 +3941,7 @@ var MapInstance = class extends import_obsidian10.Component {
         }
       }
     ];
-    this.openMenu = new ZMMenu();
+    this.openMenu = new ZMMenu(this.el.ownerDocument);
     this.openMenu.open(ev.clientX, ev.clientY, items);
     const outside = (event) => {
       if (!this.openMenu) return;
@@ -4427,7 +4419,7 @@ var MapInstance = class extends import_obsidian10.Component {
             }
           });
         }
-        this.openMenu = new ZMMenu();
+        this.openMenu = new ZMMenu(this.el.ownerDocument);
         this.openMenu.open(ev.clientX, ev.clientY, items);
         const outside = (event) => {
           if (!this.openMenu) return;
@@ -4440,22 +4432,12 @@ var MapInstance = class extends import_obsidian10.Component {
           if (event.key === "Escape") this.closeMenu();
         };
         const rightClickClose = () => this.closeMenu();
-        document.addEventListener("pointerdown", outside, {
-          capture: true
-        });
-        document.addEventListener("contextmenu", rightClickClose, {
-          capture: true
-        });
-        document.addEventListener("keydown", keyClose, {
-          capture: true
-        });
+        document.addEventListener("pointerdown", outside, { capture: true });
+        document.addEventListener("contextmenu", rightClickClose, { capture: true });
+        document.addEventListener("keydown", keyClose, { capture: true });
         this.register(() => {
           document.removeEventListener("pointerdown", outside, true);
-          document.removeEventListener(
-            "contextmenu",
-            rightClickClose,
-            true
-          );
+          document.removeEventListener("contextmenu", rightClickClose, true);
           document.removeEventListener("keydown", keyClose, true);
         });
       });
@@ -5404,10 +5386,11 @@ var ConfirmModal = class extends import_obsidian10.Modal {
   }
 };
 var ZMMenu = class {
-  constructor() {
+  constructor(doc) {
     this.submenus = [];
     this.items = [];
-    this.root = document.body.createDiv({ cls: "zm-menu" });
+    this.doc = doc;
+    this.root = this.doc.body.createDiv({ cls: "zm-menu" });
     this.root.addEventListener("contextmenu", (e) => e.stopPropagation());
   }
   open(clientX, clientY, items) {
@@ -5446,12 +5429,14 @@ var ZMMenu = class {
         arrow.setText("\u25B6");
         let submenuEl = null;
         const openSub = () => {
+          var _a2;
           if (submenuEl) return;
-          submenuEl = document.body.createDiv({ cls: "zm-submenu" });
+          submenuEl = this.doc.body.createDiv({ cls: "zm-submenu" });
           this.submenus.push(submenuEl);
           this.buildList(submenuEl, it.children);
           const rect = row.getBoundingClientRect();
-          const pref = rect.right + 260 < window.innerWidth ? "right" : "left";
+          const win = (_a2 = this.doc.defaultView) != null ? _a2 : window;
+          const pref = rect.right + 260 < win.innerWidth ? "right" : "left";
           const x = pref === "right" ? rect.right : rect.left;
           const y = rect.top;
           this.position(submenuEl, x, y, pref);
@@ -5478,7 +5463,9 @@ var ZMMenu = class {
         row.addEventListener("click", () => {
           if (!it.action) return;
           try {
-            void Promise.resolve(it.action(row, this)).catch((err) => console.error("Menu item action failed:", err));
+            void Promise.resolve(it.action(row, this)).catch(
+              (err) => console.error("Menu item action failed:", err)
+            );
           } catch (err) {
             console.error("Menu item action failed:", err);
           }
@@ -5497,12 +5484,14 @@ var ZMMenu = class {
     }
   }
   position(el, clientX, clientY, prefer) {
+    var _a;
     const pad = 6;
     const rect = el.getBoundingClientRect();
     let x = clientX;
     let y = clientY;
-    const vw = window.innerWidth;
-    const vh = window.innerHeight;
+    const win = (_a = this.doc.defaultView) != null ? _a : window;
+    const vw = win.innerWidth;
+    const vh = win.innerHeight;
     if (prefer === "right") {
       if (clientX + rect.width + pad > vw) x = Math.max(pad, vw - rect.width - pad);
     } else {

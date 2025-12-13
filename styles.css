@@ -222,6 +222,7 @@
   -webkit-user-drag: none;
   transform-origin: 50% 50%;
   height: auto; /* keep previous behavior without inline styles */
+  pointer-events: none; /* important: prevent OS/Obsidian image context menu */
 }
 
 /* Hidden helper (avoid inline style.display writes) */
@@ -892,4 +893,45 @@ body.zm-cursor-resize-nesw {
 
 .zoommap-drawing-editor__num-input {
   width: 8ch;
+}
+
+.zoommap-pin-size-info {
+  margin-bottom: 8px;
+}
+
+.zoommap-pin-size-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.zoommap-pin-size-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.zoommap-pin-size-icon {
+  width: 18px;
+  height: 18px;
+  object-fit: contain;
+}
+
+.zoommap-pin-size-key {
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.zoommap-pin-size-base {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.zoommap-pin-size-input {
+  width: 7ch;
+}
+
+.zoommap-pin-size-label {
+  font-size: 11px;
+  color: var(--text-muted);
 }

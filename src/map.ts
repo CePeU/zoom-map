@@ -2190,8 +2190,10 @@ private onContextMenuViewport(e: MouseEvent): void {
       );
     }
 
-    this.openMenu = new ZMMenu();
+    this.openMenu = new ZMMenu(this.el.ownerDocument);
     this.openMenu.open(e.clientX, e.clientY, items);
+
+    const doc = this.el.ownerDocument;
 
     const outside = (ev: Event) => {
       if (!this.openMenu) return;
@@ -2199,19 +2201,21 @@ private onContextMenuViewport(e: MouseEvent): void {
       if (t instanceof Node && this.openMenu.contains(t)) return;
       this.closeMenu();
     };
+
     const keyClose = (ev: KeyboardEvent) => {
       if (ev.key === "Escape") this.closeMenu();
     };
+
     const rightClickClose = () => this.closeMenu();
 
-    document.addEventListener("pointerdown", outside, { capture: true });
-    document.addEventListener("contextmenu", rightClickClose, { capture: true });
-    document.addEventListener("keydown", keyClose, { capture: true });
+    doc.addEventListener("pointerdown", outside, { capture: true });
+    doc.addEventListener("contextmenu", rightClickClose, { capture: true });
+    doc.addEventListener("keydown", keyClose, { capture: true });
 
     this.register(() => {
-      document.removeEventListener("pointerdown", outside, true);
-      document.removeEventListener("contextmenu", rightClickClose, true);
-      document.removeEventListener("keydown", keyClose, true);
+      doc.removeEventListener("pointerdown", outside, true);
+      doc.removeEventListener("contextmenu", rightClickClose, true);
+      doc.removeEventListener("keydown", keyClose, true);
     });
   }
 
@@ -3139,7 +3143,7 @@ private onContextMenuViewport(e: MouseEvent): void {
     },
   ];
 
-    this.openMenu = new ZMMenu();
+    this.openMenu = new ZMMenu(this.el.ownerDocument);
     this.openMenu.open(ev.clientX, ev.clientY, items);
 
     const outside = (event: Event) => {
@@ -3154,14 +3158,14 @@ private onContextMenuViewport(e: MouseEvent): void {
     const rightClickClose = () => this.closeMenu();
 
     document.addEventListener("pointerdown", outside, { capture: true });
-    document.addEventListener("contextmenu", rightClickClose, { capture: true });
-    document.addEventListener("keydown", keyClose, { capture: true });
+	document.addEventListener("contextmenu", rightClickClose, { capture: true });
+	document.addEventListener("keydown", keyClose, { capture: true });
 
-    this.register(() => {
-      document.removeEventListener("pointerdown", outside, true);
-      document.removeEventListener("contextmenu", rightClickClose, true);
-      document.removeEventListener("keydown", keyClose, true);
-    });
+	this.register(() => {
+	  document.removeEventListener("pointerdown", outside, true);
+	  document.removeEventListener("contextmenu", rightClickClose, true);
+	  document.removeEventListener("keydown", keyClose, true);
+	});
   }
   
   private getOrCreateDefaultDrawLayer(): DrawLayer {
@@ -3708,7 +3712,7 @@ private onContextMenuViewport(e: MouseEvent): void {
           });
         }
 
-        this.openMenu = new ZMMenu();
+        this.openMenu = new ZMMenu(this.el.ownerDocument);
         this.openMenu.open(ev.clientX, ev.clientY, items);
 
         const outside = (event: Event) => {
@@ -3723,25 +3727,15 @@ private onContextMenuViewport(e: MouseEvent): void {
         };
         const rightClickClose = () => this.closeMenu();
 
-        document.addEventListener("pointerdown", outside, {
-          capture: true,
-        });
-        document.addEventListener("contextmenu", rightClickClose, {
-          capture: true,
-        });
-        document.addEventListener("keydown", keyClose, {
-          capture: true,
-        });
+        document.addEventListener("pointerdown", outside, { capture: true });
+		document.addEventListener("contextmenu", rightClickClose, { capture: true });
+		document.addEventListener("keydown", keyClose, { capture: true });
 
-        this.register(() => {
-          document.removeEventListener("pointerdown", outside, true);
-          document.removeEventListener(
-            "contextmenu",
-            rightClickClose,
-            true,
-          );
-          document.removeEventListener("keydown", keyClose, true);
-        });
+		this.register(() => {
+		  document.removeEventListener("pointerdown", outside, true);
+		  document.removeEventListener("contextmenu", rightClickClose, true);
+		  document.removeEventListener("keydown", keyClose, true);
+		});
       });
     }
   }
@@ -4934,12 +4928,14 @@ interface ZMMenuItem {
 }
 
 class ZMMenu {
+  private doc: Document;
   private root: HTMLDivElement;
   private submenus: HTMLDivElement[] = [];
   private items: ZMMenuItem[] = [];
 
-  constructor() {
-    this.root = document.body.createDiv({ cls: "zm-menu" });
+  constructor(doc: Document) {
+    this.doc = doc;
+    this.root = this.doc.body.createDiv({ cls: "zm-menu" });
     this.root.addEventListener("contextmenu", (e) => e.stopPropagation());
   }
 
@@ -4987,11 +4983,13 @@ class ZMMenu {
 
         const openSub = () => {
           if (submenuEl) return;
-          submenuEl = document.body.createDiv({ cls: "zm-submenu" });
+          submenuEl = this.doc.body.createDiv({ cls: "zm-submenu" });
           this.submenus.push(submenuEl);
           this.buildList(submenuEl, it.children!);
+
           const rect = row.getBoundingClientRect();
-          const pref = rect.right + 260 < window.innerWidth ? "right" : "left";
+          const win = this.doc.defaultView ?? window;
+          const pref = rect.right + 260 < win.innerWidth ? "right" : "left";
           const x = pref === "right" ? rect.right : rect.left;
           const y = rect.top;
           this.position(submenuEl, x, y, pref);
@@ -5021,7 +5019,9 @@ class ZMMenu {
         row.addEventListener("click", () => {
           if (!it.action) return;
           try {
-            void Promise.resolve(it.action(row, this)).catch((err) => console.error("Menu item action failed:", err));
+            void Promise.resolve(it.action(row, this)).catch((err) =>
+              console.error("Menu item action failed:", err),
+            );
           } catch (err) {
             console.error("Menu item action failed:", err);
           }
@@ -5032,9 +5032,12 @@ class ZMMenu {
 
   private symbolForMark(mark: "check" | "x" | "minus"): string {
     switch (mark) {
-      case "x": return "×";
-      case "minus": return "–";
-      default: return "✓";
+      case "x":
+        return "×";
+      case "minus":
+        return "–";
+      default:
+        return "✓";
     }
   }
 
@@ -5048,8 +5051,10 @@ class ZMMenu {
     const rect = el.getBoundingClientRect();
     let x = clientX;
     let y = clientY;
-    const vw = window.innerWidth;
-    const vh = window.innerHeight;
+
+    const win = this.doc.defaultView ?? window;
+    const vw = win.innerWidth;
+    const vh = win.innerHeight;
 
     if (prefer === "right") {
       if (clientX + rect.width + pad > vw) x = Math.max(pad, vw - rect.width - pad);

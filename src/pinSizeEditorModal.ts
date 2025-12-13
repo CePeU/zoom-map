@@ -36,45 +36,41 @@ export class PinSizeEditorModal extends Modal {
     const info = contentEl.createEl("div", {
       text: "Set per-map sizes for pin icons. Leave the override empty to use the global default size from settings.",
     });
-    info.style.marginBottom = "8px";
+    info.addClass("zoommap-pin-size-info");
 
-    const list = contentEl.createDiv();
-    list.style.display = "flex";
-    list.style.flexDirection = "column";
-    list.style.gap = "6px";
+    const list = contentEl.createDiv({ cls: "zoommap-pin-size-list" });
 
     for (const row of this.rows) {
-      const r = list.createDiv();
-      r.style.display = "flex";
-      r.style.alignItems = "center";
-      r.style.gap = "8px";
+      const r = list.createDiv({ cls: "zoommap-pin-size-row" });
 
-      const img = r.createEl("img");
+      const img = r.createEl("img", { cls: "zoommap-pin-size-icon" });
       img.src = row.imgUrl;
-      img.style.width = "18px";
-      img.style.height = "18px";
-      img.style.objectFit = "contain";
 
-      const keySpan = r.createEl("code", { text: row.iconKey });
-      keySpan.style.minWidth = "0";
-      keySpan.style.whiteSpace = "nowrap";
+      r.createEl("code", { text: row.iconKey, cls: "zoommap-pin-size-key" });
 
-      const baseSpan = r.createEl("span", {
+      r.createEl("span", {
         text: `${row.baseSize}px default`,
+        cls: "zoommap-pin-size-base",
       });
-      baseSpan.style.fontSize = "11px";
-      baseSpan.style.color = "var(--text-muted)";
 
-      const overrideInput = r.createEl("input", { type: "number" });
-      overrideInput.style.width = "7ch";
+      const overrideInput = r.createEl("input", {
+        type: "number",
+        cls: "zoommap-pin-size-input",
+      });
       overrideInput.placeholder = String(row.baseSize);
-      if (typeof row.override === "number" && row.override > 0 && row.override !== row.baseSize) {
+
+      if (
+        typeof row.override === "number" &&
+        row.override > 0 &&
+        row.override !== row.baseSize
+      ) {
         overrideInput.value = String(row.override);
       }
 
-      const label = r.createEl("span", { text: "Pixels on this map" });
-      label.style.fontSize = "11px";
-      label.style.color = "var(--text-muted)";
+      r.createEl("span", {
+        text: "Pixels on this map",
+        cls: "zoommap-pin-size-label",
+      });
 
       this.inputs.set(row.iconKey, overrideInput);
     }
@@ -89,20 +85,20 @@ export class PinSizeEditorModal extends Modal {
       for (const row of this.rows) {
         const input = this.inputs.get(row.iconKey);
         if (!input) continue;
+
         const raw = input.value.trim();
         if (!raw) {
-          // No override
           result[row.iconKey] = undefined;
           continue;
         }
+
         const n = Number(raw);
         if (!Number.isFinite(n) || n <= 0) {
-          // Invalid override → treat as "no override"
           result[row.iconKey] = undefined;
           continue;
         }
+
         if (Math.abs(n - row.baseSize) < 0.0001) {
-          // Same as default → no override needed
           result[row.iconKey] = undefined;
         } else {
           result[row.iconKey] = Math.round(n);
