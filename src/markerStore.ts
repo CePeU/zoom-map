@@ -63,7 +63,7 @@ export interface Drawing {
   bakedHeight?: number;
 }
 
-export type MarkerKind = "pin" | "sticker";
+export type MarkerKind = "pin" | "sticker" | "swap";
 
 export type AnchorSpace = "world" | "viewport";
 
@@ -89,10 +89,16 @@ export interface Marker {
   tooltip?: string;
   tooltipAlwaysOn?: boolean;
 
-  // Marker type + sticker fields
+  // Marker type + sticker/swap fields
   type?: MarkerKind;
+
+  // Sticker
   stickerPath?: string;
   stickerSize?: number;
+
+  // Swap pins (icon sequence defined via collections)
+  swapKey?: string;    // id of a SwapPinPreset in collections
+  swapIndex?: number;  // current frame index in that preset
 
   // Optional: per-pin zoom range (undefined → always visible)
   minZoom?: number;

@@ -1204,7 +1204,12 @@ class ZoomMapSettingTab extends PluginSettingTab {
           name.addClass("zoommap-collections-name");
 
           const meta = left.createEl("div", {
-            text: `${c.bindings?.basePaths?.length ?? 0} bases • ${c.include?.pinKeys?.length ?? 0} pins • ${c.include?.favorites?.length ?? 0} favorites • ${c.include?.stickers?.length ?? 0} stickers`,
+            text:
+              `${c.bindings?.basePaths?.length ?? 0} bases` +
+              ` • ${c.include?.pinKeys?.length ?? 0} pins` +
+              ` • ${c.include?.favorites?.length ?? 0} favorites` +
+              ` • ${c.include?.stickers?.length ?? 0} stickers` +
+              ` • ${c.include?.swapPins?.length ?? 0} swap pins`,
           });
           meta.addClass("zoommap-collections-meta");
 

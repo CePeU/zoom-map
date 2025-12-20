@@ -22,6 +22,7 @@ import { NamePromptModal } from "./namePrompt";
 import { RenameLayerModal, DeleteLayerModal } from "./layerManageModals";
 import { PinSizeEditorModal, type PinSizeEditorRow } from "./pinSizeEditorModal";
 import { ViewEditorModal, type ViewEditorConfig } from "./viewEditorModal";
+import { SwapFramesEditorModal } from "./collectionsModals";
 
 /* ===== Collections (base-bound) ===== */
 export interface MarkerPreset {
@@ -41,6 +42,20 @@ export interface StickerPreset {
   openEditor: boolean;
 }
 
+export interface SwapPinFrame {
+  iconKey: string;
+  link?: string;
+}
+
+export interface SwapPinPreset {
+  id: string;
+  name: string;
+  frames: SwapPinFrame[];
+  defaultScaleLikeSticker?: boolean;
+  defaultHud?: boolean;
+  hoverPopover?: boolean;
+}
+
 export interface BaseCollectionBinding {
   basePaths: string[];
   aliases?: string[]; // deprecated
@@ -57,6 +72,7 @@ export interface BaseCollection {
     pinKeys: string[];
     favorites: MarkerPreset[];
     stickers: StickerPreset[];
+    swapPins?: SwapPinPreset[];
   };
   options?: BaseCollectionOptions; // deprecated
 }
@@ -1702,26 +1718,125 @@ private async applyViewEditorResult(cfg: ViewEditorConfig): Promise<void> {
     favsGlobal: MarkerPreset[];
     stickersBase: StickerPreset[];
     stickersGlobal: StickerPreset[];
+    swapBase: SwapPinPreset[];
+    swapGlobal: SwapPinPreset[];
   } {
     const { matched, globals } = this.getCollectionsSplitForActive();
 
     const pinsBase = [...new Set(matched.flatMap((c) => c.include?.pinKeys ?? []))];
 
     const favsBase: MarkerPreset[] = [];
-    matched.forEach((c) => (c.include?.favorites ?? []).forEach((f) => favsBase.push(f)));
+    matched.forEach((c) =>
+      (c.include?.favorites ?? []).forEach((f) => favsBase.push(f)),
+    );
 
     const stickersBase: StickerPreset[] = [];
-    matched.forEach((c) => (c.include?.stickers ?? []).forEach((s) => stickersBase.push(s)));
+    matched.forEach((c) =>
+      (c.include?.stickers ?? []).forEach((s) => stickersBase.push(s)),
+    );
 
     const pinsGlobal = [...new Set(globals.flatMap((c) => c.include?.pinKeys ?? []))];
 
     const favsGlobal: MarkerPreset[] = [];
-    globals.forEach((c) => (c.include?.favorites ?? []).forEach((f) => favsGlobal.push(f)));
+    globals.forEach((c) =>
+      (c.include?.favorites ?? []).forEach((f) => favsGlobal.push(f)),
+    );
 
     const stickersGlobal: StickerPreset[] = [];
-    globals.forEach((c) => (c.include?.stickers ?? []).forEach((s) => stickersGlobal.push(s)));
+    globals.forEach((c) =>
+      (c.include?.stickers ?? []).forEach((s) => stickersGlobal.push(s)),
+    );
 
-    return { pinsBase, pinsGlobal, favsBase, favsGlobal, stickersBase, stickersGlobal };
+    const swapBase: SwapPinPreset[] = [];
+    matched.forEach((c) =>
+      (c.include?.swapPins ?? []).forEach((sp) => swapBase.push(sp)),
+    );
+
+    const swapGlobal: SwapPinPreset[] = [];
+    globals.forEach((c) =>
+      (c.include?.swapPins ?? []).forEach((sp) => swapGlobal.push(sp)),
+    );
+
+    return {
+      pinsBase,
+      pinsGlobal,
+      favsBase,
+      favsGlobal,
+      stickersBase,
+      stickersGlobal,
+      swapBase,
+      swapGlobal,
+    };
+  }
+  
+  private findSwapPresetById(id: string): SwapPinPreset | undefined {
+    const cols = this.plugin.settings.baseCollections ?? [];
+    for (const col of cols) {
+      const list = col.include?.swapPins ?? [];
+      const found = list.find((sp) => sp.id === id);
+      if (found) return found;
+    }
+    return undefined;
+  }
+
+  private getSwapFrameForMarker(m: Marker): SwapPinFrame | null {
+    if (m.type !== "swap" || !m.swapKey) return null;
+    const preset = this.findSwapPresetById(m.swapKey);
+    if (!preset || !preset.frames.length) return null;
+    const rawIndex = typeof m.swapIndex === "number" ? m.swapIndex : 0;
+    const count = preset.frames.length;
+    const idx = ((rawIndex % count) + count) % count;
+    return preset.frames[idx];
+  }
+
+  private advanceSwapPin(m: Marker): void {
+    if (m.type !== "swap" || !m.swapKey) return;
+    const preset = this.findSwapPresetById(m.swapKey);
+    if (!preset || !preset.frames.length) return;
+    const rawIndex = typeof m.swapIndex === "number" ? m.swapIndex : 0;
+    const next = rawIndex + 1;
+    const count = preset.frames.length;
+    m.swapIndex = ((next % count) + count) % count;
+  }
+
+  private addSwapPinHere(preset: SwapPinPreset, vx: number, vy: number): void {
+    if (!this.data) return;
+
+    const layerId = this.getPreferredNewMarkerLayerId();
+    const isHud = !!preset.defaultHud;
+    const scaleLike = !!preset.defaultScaleLikeSticker;
+
+    const marker: Marker = {
+      id: generateId("marker"),
+      type: "swap",
+      layer: layerId,
+      x: 0,
+      y: 0,
+      swapKey: preset.id,
+      swapIndex: 0,
+    };
+
+    if (isHud) {
+      marker.anchorSpace = "viewport";
+      marker.hudX = vx;
+      marker.hudY = vy;
+      this.classifyHudMetaFromCurrentPosition(
+        marker,
+        this.viewportEl.getBoundingClientRect(),
+      );
+    } else {
+      const wx = (vx - this.tx) / this.scale;
+      const wy = (vy - this.ty) / this.scale;
+      marker.x = clamp(wx / this.imgW, 0, 1);
+      marker.y = clamp(wy / this.imgH, 0, 1);
+    }
+
+    if (scaleLike) marker.scaleLikeSticker = true;
+
+    this.data.markers.push(marker);
+    void this.saveDataSoon();
+    this.renderMarkersOnly();
+    new Notice("Swap pin added.", 900);
   }
 
 private onContextMenuViewport(e: MouseEvent): void {
@@ -1898,8 +2013,16 @@ private onContextMenuViewport(e: MouseEvent): void {
       }
     }
 
-    const { pinsBase, pinsGlobal, favsBase, favsGlobal, stickersBase, stickersGlobal } =
-      this.computeCollectionSets();
+    const {
+      pinsBase,
+      pinsGlobal,
+      favsBase,
+      favsGlobal,
+      stickersBase,
+      stickersGlobal,
+      swapBase,
+      swapGlobal,
+    } = this.computeCollectionSets();
 
     const pinItemFromKey = (key: string): ZMMenuItem | null => {
       const info = this.getIconInfo(key);
@@ -1948,6 +2071,7 @@ private onContextMenuViewport(e: MouseEvent): void {
 
     const stickersBaseMenu = stickerItems(stickersBase);
     const stickersGlobalMenu = stickerItems(stickersGlobal);
+	const allSwapPresets: SwapPinPreset[] = [...swapBase, ...swapGlobal];
 
     const addHereChildren: ZMMenuItem[] = [
       {
@@ -1999,6 +2123,28 @@ private onContextMenuViewport(e: MouseEvent): void {
         },
       },
     );
+	
+	if (allSwapPresets.length === 1) {
+      const sp = allSwapPresets[0];
+      addHereChildren.push({
+        label: "Add swap pin here",
+        action: () => {
+          this.addSwapPinHere(sp, vx, vy);
+          this.closeMenu();
+        },
+      });
+    } else if (allSwapPresets.length > 1) {
+      addHereChildren.push({
+        label: "Add swap pin here",
+        children: allSwapPresets.map((sp) => ({
+          label: sp.name || "(swap pin)",
+          action: () => {
+            this.addSwapPinHere(sp, vx, vy);
+            this.closeMenu();
+          },
+        })),
+      });
+    }
 
     const items: ZMMenuItem[] = [
       { label: "Add marker here", children: addHereChildren },
@@ -3774,7 +3920,16 @@ private onContextMenuViewport(e: MouseEvent): void {
         anch.appendChild(icon);
       } else {
         const scaleLike = isScaleLikeSticker(m);
-        const info = this.getIconInfo(m.iconKey);
+
+        let effectiveKey = m.iconKey;
+        if (m.type === "swap") {
+          const frame = this.getSwapFrameForMarker(m);
+          if (frame?.iconKey) {
+            effectiveKey = frame.iconKey;
+          }
+        }
+
+        const info = this.getIconInfo(effectiveKey);
 
         let imgUrl = info.imgUrl;
         const markerColor = m.iconColor?.trim();
@@ -3891,6 +4046,81 @@ private onContextMenuViewport(e: MouseEvent): void {
         ev.stopPropagation();
         this.closeMenu();
 
+        if (m.type === "swap") {
+          const preset = m.swapKey
+            ? this.findSwapPresetById(m.swapKey)
+            : undefined;
+          if (!preset) return;
+
+          if (!ev.altKey) {
+            this.advanceSwapPin(m);
+            void this.saveDataSoon();
+            this.renderMarkersOnly();
+            return;
+          }
+
+          const items: ZMMenuItem[] = [
+            {
+              label: "Edit swap pin",
+              action: () => {
+                this.closeMenu();
+                new SwapFramesEditorModal(
+                  this.app,
+                  this.plugin,
+                  preset,
+                  (updated) => {
+                    preset.name = updated.name;
+                    preset.frames = updated.frames;
+                    preset.defaultHud = updated.defaultHud;
+                    preset.defaultScaleLikeSticker =
+                      updated.defaultScaleLikeSticker;
+                    preset.hoverPopover = updated.hoverPopover;
+                    void this.plugin.saveSettings();
+                    this.renderMarkersOnly();
+                  },
+                ).open();
+              },
+            },
+            {
+              label: "Delete swap pin",
+              action: () => {
+                this.closeMenu();
+                this.deleteMarker(m);
+              },
+            },
+          ];
+
+          this.openMenu = new ZMMenu(this.el.ownerDocument);
+          this.openMenu.open(ev.clientX, ev.clientY, items);
+
+          const outside = (event: Event) => {
+            if (!this.openMenu) return;
+            const t = event.target;
+            if (t instanceof HTMLElement && this.openMenu.contains(t)) return;
+            this.closeMenu();
+          };
+          const keyClose = (event: KeyboardEvent) => {
+            if (event.key === "Escape") this.closeMenu();
+          };
+          const rightClickClose = () => this.closeMenu();
+
+          document.addEventListener("pointerdown", outside, {
+            capture: true,
+          });
+          document.addEventListener("contextmenu", rightClickClose, {
+            capture: true,
+          });
+          document.addEventListener("keydown", keyClose, { capture: true });
+
+          this.register(() => {
+            document.removeEventListener("pointerdown", outside, true);
+            document.removeEventListener("contextmenu", rightClickClose, true);
+            document.removeEventListener("keydown", keyClose, true);
+          });
+
+          return;
+        }
+
         const items: ZMMenuItem[] = [
           {
             label: m.type === "sticker" ? "Edit sticker" : "Edit marker",
@@ -3971,13 +4201,32 @@ private onContextMenuViewport(e: MouseEvent): void {
   private onMarkerEnter(ev: MouseEvent, m: Marker, hostEl: HTMLElement): void {
     if (m.type === "sticker") return;
 
+    let link: string | undefined;
+    let hoverOverride = false;
+
+    if (m.type === "swap") {
+      const frame = this.getSwapFrameForMarker(m);
+      link = frame?.link;
+
+      if (m.swapKey) {
+        const preset = this.findSwapPresetById(m.swapKey);
+        hoverOverride = !!preset?.hoverPopover;
+      }
+    } else {
+      link = m.link;
+    }
+
     const hasTooltipText = !!m.tooltip && m.tooltip.trim().length > 0;
     const wantInternalTooltip =
-      hasTooltipText && (!!m.tooltipAlwaysOn || !m.link);
+      hasTooltipText && (!!m.tooltipAlwaysOn || !link);
 
-    if (m.link) {
+    if (link) {
       const workspace = this.app.workspace;
-      const eventForPopover = this.plugin.settings.forcePopoverWithoutModKey
+
+      const forcePopover =
+        this.plugin.settings.forcePopoverWithoutModKey || hoverOverride;
+
+      const eventForPopover = forcePopover
         ? new MouseEvent("mousemove", {
             clientX: ev.clientX,
             clientY: ev.clientY,
@@ -3993,7 +4242,7 @@ private onContextMenuViewport(e: MouseEvent): void {
         source: "zoom-map",
         hoverParent: this,
         targetEl: hostEl,
-        linktext: m.link,
+        linktext: link,
         sourcePath: this.cfg.sourcePath,
       });
 
@@ -4225,8 +4474,15 @@ private onContextMenuViewport(e: MouseEvent): void {
   }
   
   private openMarkerLink(m: Marker): void {
-    if (!m.link) return;
-    void this.app.workspace.openLinkText(m.link, this.cfg.sourcePath);
+    let link = m.link;
+
+    if (m.type === "swap") {
+      const frame = this.getSwapFrameForMarker(m);
+      link = frame?.link;
+    }
+
+    if (!link) return;
+    void this.app.workspace.openLinkText(link, this.cfg.sourcePath);
   }
 
   private async setActiveBase(path: string): Promise<void> {
