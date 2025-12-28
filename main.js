@@ -1405,7 +1405,7 @@ var PinSizeEditorModal = class extends import_obsidian9.Modal {
 var import_obsidian10 = require("obsidian");
 var ViewEditorModal = class extends import_obsidian10.Modal {
   constructor(app, initial, onResult) {
-    var _a, _b, _c, _d, _e, _f, _g, _h, _i;
+    var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j;
     super(app);
     this.cfg = JSON.parse(JSON.stringify(initial));
     this.onResult = onResult;
@@ -1419,8 +1419,13 @@ var ViewEditorModal = class extends import_obsidian10.Modal {
     (_g = this.cfg).renderMode || (_g.renderMode = "dom");
     (_h = this.cfg).resizeHandle || (_h.resizeHandle = "right");
     if (typeof this.cfg.viewportFrame !== "string") this.cfg.viewportFrame = "";
-    const over = Number((_i = this.cfg.viewportFrameOverhang) != null ? _i : 0);
-    this.cfg.viewportFrameOverhang = Number.isFinite(over) && over >= 0 ? Math.round(over) : 0;
+    (_j = (_i = this.cfg).viewportFrameInsets) != null ? _j : _i.viewportFrameInsets = {
+      unit: "framePx",
+      top: 0,
+      right: 0,
+      bottom: 0,
+      left: 0
+    };
   }
   factorToPercentString(f) {
     if (typeof f !== "number" || !Number.isFinite(f) || f <= 0) return "";
@@ -1719,10 +1724,11 @@ var ViewEditorModal = class extends import_obsidian10.Modal {
     });
     contentEl.createEl("h3", { text: "Viewport frame" });
     let frameInputEl = null;
-    const frameSetting = new import_obsidian10.Setting(contentEl).setClass("zoommap-view-editor-row").setName("Frame image (optional)").setDesc("Drawn above the map (does not block mouse). Supports overhang.");
+    const insets = this.cfg.viewportFrameInsets;
+    const frameSetting = new import_obsidian10.Setting(contentEl).setClass("zoommap-view-editor-row").setName("Frame image (optional)").setDesc("Drawn above the map. Supports overhang.");
     frameSetting.addText((t) => {
       var _a;
-      t.setPlaceholder("Path to frame image (png/svg) or data:URL");
+      t.setPlaceholder("Path to frame image.");
       t.setValue((_a = this.cfg.viewportFrame) != null ? _a : "");
       frameInputEl = t.inputEl;
       t.onChange((v) => {
@@ -1744,22 +1750,38 @@ var ViewEditorModal = class extends import_obsidian10.Modal {
         if (frameInputEl) frameInputEl.value = "";
       })
     );
-    new import_obsidian10.Setting(contentEl).setClass("zoommap-view-editor-row").setName("Frame overhang (px)").setDesc("Extra pixels the frame extends beyond the map border.").addText((t) => {
-      var _a;
-      t.inputEl.type = "number";
-      t.inputEl.classList.add("zoommap-view-editor-input--short");
-      t.setPlaceholder("0");
-      t.setValue(String((_a = this.cfg.viewportFrameOverhang) != null ? _a : 0));
-      t.onChange((v) => {
-        const n = Number(v);
-        this.cfg.viewportFrameOverhang = Number.isFinite(n) ? Math.max(0, Math.round(n)) : 0;
+    const unitSetting = new import_obsidian10.Setting(contentEl).setClass("zoommap-view-editor-row").setName("Viewport insets unit").setDesc("framePx = values in the frame image pixel space; percent = 0..100 of the outer box.");
+    unitSetting.addDropdown((d) => {
+      d.addOption("framePx", "framePx");
+      d.addOption("percent", "percent");
+      d.setValue(insets.unit);
+      d.onChange((v) => {
+        insets.unit = v === "percent" ? "percent" : "framePx";
       });
     });
+    const insetRow = (label, key) => {
+      new import_obsidian10.Setting(contentEl).setClass("zoommap-view-editor-row").setName(`Inset ${label}`).addText((t) => {
+        var _a;
+        t.inputEl.type = "number";
+        t.inputEl.classList.add("zoommap-view-editor-input--short");
+        t.setPlaceholder("0");
+        t.setValue(String((_a = insets[key]) != null ? _a : 0));
+        t.onChange((v) => {
+          const n = Number(String(v).replace(",", "."));
+          if (!Number.isFinite(n) || n < 0) return;
+          insets[key] = Math.round(n);
+        });
+      });
+    };
+    insetRow("Top", "top");
+    insetRow("Right", "right");
+    insetRow("Bottom", "bottom");
+    insetRow("Left", "left");
     const footer = contentEl.createDiv({ cls: "zoommap-modal-footer" });
     const saveBtn = footer.createEl("button", { text: "Save" });
     const cancelBtn = footer.createEl("button", { text: "Cancel" });
     saveBtn.onclick = () => {
-      var _a, _b, _c, _d;
+      var _a, _b, _c;
       const first = (_b = (_a = this.cfg.imageBases[0]) == null ? void 0 : _a.path) == null ? void 0 : _b.trim();
       if (!first) {
         new import_obsidian10.Notice("Please select at least one base image.", 2500);
@@ -1769,8 +1791,9 @@ var ViewEditorModal = class extends import_obsidian10.Modal {
       this.autoFillMarkersPathFromFirstBase();
       const frame = ((_c = this.cfg.viewportFrame) != null ? _c : "").trim();
       this.cfg.viewportFrame = frame.length ? frame : void 0;
-      const over = Number((_d = this.cfg.viewportFrameOverhang) != null ? _d : 0);
-      this.cfg.viewportFrameOverhang = this.cfg.viewportFrame && Number.isFinite(over) ? Math.max(0, Math.round(over)) : 0;
+      if (!this.cfg.viewportFrame) {
+        this.cfg.viewportFrameInsets = void 0;
+      }
       this.close();
       this.onResult({ action: "save", config: this.cfg });
     };
@@ -2656,7 +2679,10 @@ var MapInstance = class extends import_obsidian13.Component {
     this.suppressClickMarkerId = null;
     this.tooltipEl = null;
     this.tooltipHideTimer = null;
+    this.frameLayerEl = null;
     this.viewportFrameEl = null;
+    this.frameNaturalW = 0;
+    this.frameNaturalH = 0;
     this.ignoreNextModify = false;
     this.ro = null;
     this.ready = false;
@@ -2690,7 +2716,6 @@ var MapInstance = class extends import_obsidian13.Component {
     this.frameSaveTimer = null;
     this.userResizing = false;
     this.yamlAppliedOnce = false;
-    this.frameOverhangPx = 0;
     this.tintedSvgCache = /* @__PURE__ */ new Map();
     this.saveDataSoon = /* @__PURE__ */ (() => {
       let t = null;
@@ -2727,7 +2752,7 @@ var MapInstance = class extends import_obsidian13.Component {
     if (!this.data) return;
     const bases = this.getBasesNormalized();
     const overlays = (_a = this.data.overlays) != null ? _a : [];
-    const rect = this.el.getBoundingClientRect();
+    const rect = this.viewportEl.getBoundingClientRect();
     const curW = Math.round(rect.width || 0);
     const curH = Math.round(rect.height || 0);
     const cfg = {
@@ -2756,7 +2781,13 @@ var MapInstance = class extends import_obsidian13.Component {
       }),
       id: this.cfg.mapId,
       viewportFrame: (_e = this.cfg.viewportFrame) != null ? _e : "",
-      viewportFrameOverhang: (_f = this.cfg.viewportFrameOverhang) != null ? _f : 0
+      viewportFrameInsets: (_f = this.cfg.viewportFrameInsets) != null ? _f : {
+        unit: "framePx",
+        top: 0,
+        right: 0,
+        bottom: 0,
+        left: 0
+      }
     };
     const modal = new ViewEditorModal(this.app, cfg, (res) => {
       if (res.action !== "save" || !res.config) return;
@@ -2778,19 +2809,6 @@ var MapInstance = class extends import_obsidian13.Component {
     const tx = this.vw / 2 - worldX * z;
     const ty = this.vh / 2 - worldY * z;
     this.applyTransform(z, tx, ty);
-  }
-  getActiveFrameOverhangPx() {
-    var _a, _b;
-    const frame = ((_a = this.cfg.viewportFrame) != null ? _a : "").trim();
-    if (!frame) return 0;
-    return Math.max(0, Math.round((_b = this.cfg.viewportFrameOverhang) != null ? _b : 0));
-  }
-  addPxToCssSize(size, px) {
-    const s = typeof size === "string" ? size.trim() : "";
-    if (!s) return null;
-    if (!px) return s;
-    if (s.toLowerCase() === "auto") return s;
-    return `calc(${s} + ${px}px)`;
   }
   async saveDefaultViewToYaml() {
     if (typeof this.cfg.sectionStart !== "number") {
@@ -2903,6 +2921,77 @@ var MapInstance = class extends import_obsidian13.Component {
     });
     new import_obsidian13.Notice("View updated. Reload the note to see changes.", 2500);
   }
+  hasViewportFrame() {
+    return typeof this.cfg.viewportFrame === "string" && this.cfg.viewportFrame.trim().length > 0;
+  }
+  getOuterSizePx() {
+    const w = this.el.clientWidth || this.el.getBoundingClientRect().width || 1;
+    const h = this.el.clientHeight || this.el.getBoundingClientRect().height || 1;
+    return { w, h };
+  }
+  clampInsetsToMinInner(outerW, outerH, insets) {
+    const minInnerW = 64;
+    const minInnerH = 64;
+    let { t, r, b, l } = insets;
+    const maxSumX = Math.max(0, outerW - minInnerW);
+    const sumX = l + r;
+    if (sumX > maxSumX && sumX > 0) {
+      const k = maxSumX / sumX;
+      l *= k;
+      r *= k;
+    }
+    const maxSumY = Math.max(0, outerH - minInnerH);
+    const sumY = t + b;
+    if (sumY > maxSumY && sumY > 0) {
+      const k = maxSumY / sumY;
+      t *= k;
+      b *= k;
+    }
+    return {
+      t: Math.max(0, Math.round(t)),
+      r: Math.max(0, Math.round(r)),
+      b: Math.max(0, Math.round(b)),
+      l: Math.max(0, Math.round(l))
+    };
+  }
+  computeViewportInsetsPx(outerW, outerH) {
+    if (!this.hasViewportFrame() || !this.cfg.viewportFrameInsets) {
+      return { t: 0, r: 0, b: 0, l: 0 };
+    }
+    const spec = this.cfg.viewportFrameInsets;
+    if (spec.unit === "percent") {
+      const t = outerH * (spec.top / 100);
+      const b = outerH * (spec.bottom / 100);
+      const l = outerW * (spec.left / 100);
+      const r = outerW * (spec.right / 100);
+      return this.clampInsetsToMinInner(outerW, outerH, { t, r, b, l });
+    }
+    if (this.frameNaturalW > 0 && this.frameNaturalH > 0) {
+      const sx = outerW / this.frameNaturalW;
+      const sy = outerH / this.frameNaturalH;
+      const t = spec.top * sy;
+      const b = spec.bottom * sy;
+      const l = spec.left * sx;
+      const r = spec.right * sx;
+      return this.clampInsetsToMinInner(outerW, outerH, { t, r, b, l });
+    }
+    return { t: 0, r: 0, b: 0, l: 0 };
+  }
+  applyViewportInset() {
+    const { w, h } = this.getOuterSizePx();
+    const { t, r, b, l } = this.computeViewportInsetsPx(w, h);
+    this.viewportEl.style.inset = `${t}px ${r}px ${b}px ${l}px`;
+  }
+  async loadViewportFrameNaturalSize() {
+    const img = this.viewportFrameEl;
+    if (!img) return;
+    try {
+      await img.decode();
+    } catch (e) {
+    }
+    this.frameNaturalW = img.naturalWidth || 0;
+    this.frameNaturalH = img.naturalHeight || 0;
+  }
   startDraw(kind) {
     var _a;
     if (!this.plugin.settings.enableDrawing) {
@@ -2976,13 +3065,11 @@ var MapInstance = class extends import_obsidian13.Component {
     this.disposeBitmaps();
   }
   async bootstrap() {
-    var _a, _b, _c, _d, _e, _f;
+    var _a, _b, _c, _d, _e, _f, _g;
     this.el.classList.add("zm-root");
+    this.el.classList.toggle("zm-root--framepad", this.hasViewportFrame());
     if (this.isCanvas()) this.el.classList.add("zm-root--canvas-mode");
     if (this.cfg.responsive) this.el.classList.add("zm-root--responsive");
-    this.frameOverhangPx = this.getActiveFrameOverhangPx();
-    const pad2 = this.frameOverhangPx * 2;
-    this.el.classList.toggle("zm-root--framepad", this.frameOverhangPx > 0);
     if (this.cfg.responsive) {
       setCssProps(this.el, {
         width: "100%",
@@ -2990,8 +3077,8 @@ var MapInstance = class extends import_obsidian13.Component {
       });
     } else {
       setCssProps(this.el, {
-        width: this.addPxToCssSize((_a = this.cfg.width) != null ? _a : null, pad2),
-        height: this.addPxToCssSize((_b = this.cfg.height) != null ? _b : null, pad2)
+        width: (_a = this.cfg.width) != null ? _a : null,
+        height: (_b = this.cfg.height) != null ? _b : null
       });
     }
     if (!this.cfg.responsive && this.cfg.resizable) {
@@ -3014,11 +3101,7 @@ var MapInstance = class extends import_obsidian13.Component {
     if (this.cfg.align === "right" && this.cfg.wrap) this.el.classList.add("zm-float-right");
     ((_c = this.cfg.extraClasses) != null ? _c : []).forEach((c) => this.el.classList.add(c));
     this.viewportEl = this.el.createDiv({ cls: "zm-viewport" });
-    if (this.frameOverhangPx > 0) {
-      this.viewportEl.style.inset = `${this.frameOverhangPx}px`;
-    } else {
-      this.viewportEl.style.removeProperty("inset");
-    }
+    this.applyViewportInset();
     this.clipEl = this.viewportEl.createDiv({ cls: "zm-clip" });
     if (this.isCanvas()) {
       this.baseCanvas = this.clipEl.createEl("canvas", { cls: "zm-canvas" });
@@ -3028,16 +3111,12 @@ var MapInstance = class extends import_obsidian13.Component {
     this.imgEl = this.worldEl.createEl("img", { cls: "zm-image" });
     this.overlaysEl = this.worldEl.createDiv({ cls: "zm-overlays" });
     this.markersEl = this.worldEl.createDiv({ cls: "zm-markers" });
-    if (this.cfg.viewportFrame && this.cfg.viewportFrame.trim()) {
-      const over = this.frameOverhangPx;
-      const img = this.viewportEl.createEl("img", { cls: "zm-viewport-frame" });
+    if (this.hasViewportFrame()) {
+      this.frameLayerEl = this.el.createDiv({ cls: "zm-frame-layer" });
+      const img = this.frameLayerEl.createEl("img", { cls: "zm-viewport-frame" });
       img.decoding = "async";
       img.draggable = false;
       img.src = this.resolveResourceUrl(this.cfg.viewportFrame.trim());
-      img.style.left = `${-over}px`;
-      img.style.top = `${-over}px`;
-      img.style.width = `calc(100% + ${over * 2}px)`;
-      img.style.height = `calc(100% + ${over * 2}px)`;
       this.viewportFrameEl = img;
     }
     this.hudClipEl = this.viewportEl.createDiv({ cls: "zm-hud-clip" });
@@ -3141,6 +3220,12 @@ var MapInstance = class extends import_obsidian13.Component {
     );
     await this.loadInitialBase(this.cfg.imagePath);
     if (this.cfg.responsive) this.updateResponsiveAspectRatio();
+    if (this.viewportFrameEl && ((_d = this.cfg.viewportFrameInsets) == null ? void 0 : _d.unit) === "framePx") {
+      await this.loadViewportFrameNaturalSize();
+      this.applyViewportInset();
+    } else {
+      this.applyViewportInset();
+    }
     await this.store.ensureExists(
       this.cfg.imagePath,
       { w: this.imgW, h: this.imgH },
@@ -3151,7 +3236,7 @@ var MapInstance = class extends import_obsidian13.Component {
     if (this.cfg.yamlMetersPerPixel && this.getMetersPerPixel() === void 0) {
       this.ensureMeasurement();
       const base = this.getActiveBasePath();
-      if ((_d = this.data) == null ? void 0 : _d.measurement) {
+      if ((_e = this.data) == null ? void 0 : _e.measurement) {
         this.data.measurement.metersPerPixel = this.cfg.yamlMetersPerPixel;
         this.data.measurement.scales[base] = this.cfg.yamlMetersPerPixel;
         if (await this.store.wouldChange(this.data)) {
@@ -3161,7 +3246,7 @@ var MapInstance = class extends import_obsidian13.Component {
       }
     }
     if (this.data) {
-      if (!((_e = this.data.size) == null ? void 0 : _e.w) || !((_f = this.data.size) == null ? void 0 : _f.h)) {
+      if (!((_f = this.data.size) == null ? void 0 : _f.w) || !((_g = this.data.size) == null ? void 0 : _g.h)) {
         this.data.size = { w: this.imgW, h: this.imgH };
         if (await this.store.wouldChange(this.data)) {
           this.ignoreNextModify = true;
@@ -3169,11 +3254,7 @@ var MapInstance = class extends import_obsidian13.Component {
         }
       }
       if (this.shouldUseSavedFrame() && this.data.frame && this.data.frame.w > 0 && this.data.frame.h > 0) {
-        const pad22 = this.frameOverhangPx * 2;
-        setCssProps(this.el, {
-          width: `${this.data.frame.w + pad22}px`,
-          height: `${this.data.frame.h + pad22}px`
-        });
+        setCssProps(this.el, { width: `${this.data.frame.w}px`, height: `${this.data.frame.h}px` });
       }
     }
     this.ro = new ResizeObserver(() => this.onResize());
@@ -4319,10 +4400,13 @@ var MapInstance = class extends import_obsidian13.Component {
     return pathOrData;
   }
   onResize() {
-    if (!this.ready || !this.data) {
-      if (this.isCanvas()) this.renderCanvas();
-      return;
-    }
+    if (!this.ready || !this.data) return;
+    const oldRect = this.viewportEl.getBoundingClientRect();
+    const oldVw = oldRect.width || this.vw || 1;
+    const oldVh = oldRect.height || this.vh || 1;
+    const worldCx = (oldVw / 2 - this.tx) / this.scale;
+    const worldCy = (oldVh / 2 - this.ty) / this.scale;
+    this.applyViewportInset();
     const r = this.viewportEl.getBoundingClientRect();
     this.vw = r.width;
     this.vh = r.height;
@@ -4333,7 +4417,9 @@ var MapInstance = class extends import_obsidian13.Component {
       this.renderMarkersOnly();
       return;
     }
-    this.applyTransform(this.scale, this.tx, this.ty, true);
+    const txNew = this.vw / 2 - worldCx * this.scale;
+    const tyNew = this.vh / 2 - worldCy * this.scale;
+    this.applyTransform(this.scale, txNew, tyNew, true);
     this.renderMarkersOnly();
     if (this.shouldUseSavedFrame() && this.cfg.resizable && this.cfg.resizeHandle === "native" && !this.userResizing) {
       if (!this.initialLayoutDone) this.initialLayoutDone = true;
@@ -5421,7 +5507,7 @@ var MapInstance = class extends import_obsidian13.Component {
       {
         label: "(No travel presets configured)",
         action: () => {
-          new import_obsidian13.Notice("Configure presets in Settings \u2192 Travel time.", 3e3);
+          new import_obsidian13.Notice("Configure presets in settings \u2192 travel time.", 3e3);
         }
       }
     ];
@@ -7473,9 +7559,9 @@ var MapInstance = class extends import_obsidian13.Component {
     if (this.cfg.responsive) return;
     if (!this.data || !this.shouldUseSavedFrame()) return;
     if (!this.isFrameVisibleEnough(48)) return;
-    const vr = this.viewportEl.getBoundingClientRect();
-    const wNow = Math.round(vr.width);
-    const hNow = Math.round(vr.height);
+    const rr = this.el.getBoundingClientRect();
+    const wNow = Math.round(rr.width);
+    const hNow = Math.round(rr.height);
     if (wNow < 48 || hNow < 48) return;
     const prev = this.data.frame;
     const tol = 1;
@@ -8719,6 +8805,33 @@ function parsePxNumber(value, fallback) {
   }
   return fallback;
 }
+function parseFrameInsetsYaml(v) {
+  if (!v || typeof v !== "object") return void 0;
+  const o = v;
+  const unit = o.unit === "percent" ? "percent" : "framePx";
+  const parsePercent = (x) => {
+    if (typeof x === "number") return x;
+    if (typeof x === "string") {
+      let s = x.trim();
+      if (!s) return Number.NaN;
+      if (s.endsWith("%")) s = s.slice(0, -1).trim();
+      const n = Number(s.replace(",", "."));
+      return n;
+    }
+    return Number.NaN;
+  };
+  const parseFramePx = (x) => {
+    return parsePxNumber(x, Number.NaN);
+  };
+  const top = unit === "percent" ? parsePercent(o.top) : parseFramePx(o.top);
+  const right = unit === "percent" ? parsePercent(o.right) : parseFramePx(o.right);
+  const bottom = unit === "percent" ? parsePercent(o.bottom) : parseFramePx(o.bottom);
+  const left = unit === "percent" ? parsePercent(o.left) : parseFramePx(o.left);
+  if (![top, right, bottom, left].every((n) => Number.isFinite(n) && n >= 0)) {
+    return void 0;
+  }
+  return { unit, top, right, bottom, left };
+}
 function parseAlign(v) {
   if (v === "left" || v === "center" || v === "right") return v;
   return void 0;
@@ -8785,7 +8898,13 @@ var ZoomMapPlugin = class extends import_obsidian18.Plugin {
           markerLayers: ["Default"],
           id: `map-${Date.now().toString(36)}`,
           viewportFrame: "",
-          viewportFrameOverhang: 0
+          viewportFrameInsets: {
+            unit: "framePx",
+            top: 0,
+            right: 0,
+            bottom: 0,
+            left: 0
+          }
         };
         new ViewEditorModal(this.app, initialConfig, (res) => {
           if (res.action !== "save" || !res.config) return;
@@ -8821,6 +8940,7 @@ var ZoomMapPlugin = class extends import_obsidian18.Plugin {
         const yamlBases = parseBasesYaml(opts.imageBases);
         const yamlOverlays = parseOverlaysYaml(opts.imageOverlays);
         const yamlMetersPerPixel = parseScaleYaml(opts.scale);
+        const yamlFrameInsets = parseFrameInsetsYaml(opts.viewportFrameInsets);
         let initialZoom;
         let initialCenter;
         const viewOpt = opts.view;
@@ -8917,7 +9037,7 @@ var ZoomMapPlugin = class extends import_obsidian18.Plugin {
           initialZoom,
           initialCenter,
           viewportFrame: typeof opts.viewportFrame === "string" ? opts.viewportFrame.trim() : void 0,
-          viewportFrameOverhang: Math.max(0, parsePxNumber(opts.viewportFrameOverhang, 0))
+          viewportFrameInsets: yamlFrameInsets
         };
         const inst = new MapInstance(this.app, this, el, cfg);
         ctx.addChild(inst);
@@ -9139,8 +9259,15 @@ var ZoomMapPlugin = class extends import_obsidian18.Plugin {
     const frame = (_d = cfg.viewportFrame) == null ? void 0 : _d.trim();
     if (frame) {
       obj.viewportFrame = frame;
-      const over = typeof cfg.viewportFrameOverhang === "number" ? Math.max(0, Math.round(cfg.viewportFrameOverhang)) : 0;
-      if (over > 0) obj.viewportFrameOverhang = over;
+      if (cfg.viewportFrameInsets) {
+        obj.viewportFrameInsets = {
+          unit: cfg.viewportFrameInsets.unit,
+          top: cfg.viewportFrameInsets.top,
+          right: cfg.viewportFrameInsets.right,
+          bottom: cfg.viewportFrameInsets.bottom,
+          left: cfg.viewportFrameInsets.left
+        };
+      }
     }
     return (0, import_obsidian18.stringifyYaml)(obj).trimEnd();
   }

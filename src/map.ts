@@ -110,7 +110,13 @@ export interface ZoomMapConfig {
   initialZoom?: number;
   initialCenter?: { x: number; y: number };
   viewportFrame?: string;
-  viewportFrameOverhang?: number;
+  viewportFrameInsets?: {
+    unit: "framePx" | "percent";
+    top: number;
+    right: number;
+    bottom: number;
+    left: number;
+  };
 }
 
 export interface IconProfile {
@@ -309,7 +315,10 @@ export class MapInstance extends Component {
   private tooltipEl: HTMLDivElement | null = null;
   private tooltipHideTimer: number | null = null;
   
-  private viewportFrameEl: HTMLImageElement | null = null;  
+  private frameLayerEl: HTMLDivElement | null = null;
+  private viewportFrameEl: HTMLImageElement | null = null;
+  private frameNaturalW = 0;
+  private frameNaturalH = 0; 
 
   private ignoreNextModify = false;
 
@@ -361,7 +370,7 @@ export class MapInstance extends Component {
   const bases = this.getBasesNormalized();
   const overlays = this.data.overlays ?? [];
 
-  const rect = this.el.getBoundingClientRect();
+  const rect = this.viewportEl.getBoundingClientRect();
   const curW = Math.round(rect.width || 0);
   const curH = Math.round(rect.height || 0);
 
@@ -393,7 +402,13 @@ export class MapInstance extends Component {
 	id: this.cfg.mapId,
 
     viewportFrame: this.cfg.viewportFrame ?? "",
-    viewportFrameOverhang: this.cfg.viewportFrameOverhang ?? 0,
+    viewportFrameInsets: this.cfg.viewportFrameInsets ?? {
+      unit: "framePx",
+      top: 0,
+      right: 0,
+      bottom: 0,
+      left: 0,
+    },
   };
 
   const modal = new ViewEditorModal(this.app, cfg, (res) => {
@@ -422,22 +437,6 @@ private applyInitialView(zoom: number, center: { x: number; y: number }): void {
   const ty = this.vh / 2 - worldY * z;
 
   this.applyTransform(z, tx, ty);
-}
-
-private frameOverhangPx = 0;
-
-private getActiveFrameOverhangPx(): number {
-  const frame = (this.cfg.viewportFrame ?? "").trim();
-  if (!frame) return 0;
-  return Math.max(0, Math.round(this.cfg.viewportFrameOverhang ?? 0));
-}
-
-private addPxToCssSize(size: string | null | undefined, px: number): string | null {
-  const s = typeof size === "string" ? size.trim() : "";
-  if (!s) return null;
-  if (!px) return s;
-  if (s.toLowerCase() === "auto") return s; // can't calc auto
-  return `calc(${s} + ${px}px)`;
 }
 
 private async saveDefaultViewToYaml(): Promise<void> {
@@ -574,7 +573,94 @@ private async applyViewEditorResult(cfg: ViewEditorConfig): Promise<void> {
 }
   
   private tintedSvgCache: Map<string, string> = new Map<string, string>();
+  
+  private hasViewportFrame(): boolean {
+    return typeof this.cfg.viewportFrame === "string" && this.cfg.viewportFrame.trim().length > 0;
+  }
 
+  private getOuterSizePx(): { w: number; h: number } {
+    const w = this.el.clientWidth || this.el.getBoundingClientRect().width || 1;
+    const h = this.el.clientHeight || this.el.getBoundingClientRect().height || 1;
+    return { w, h };
+  }
+
+  private clampInsetsToMinInner(
+    outerW: number,
+    outerH: number,
+    insets: { t: number; r: number; b: number; l: number },
+  ): { t: number; r: number; b: number; l: number } {
+    const minInnerW = 64;
+    const minInnerH = 64;
+
+    let { t, r, b, l } = insets;
+
+    const maxSumX = Math.max(0, outerW - minInnerW);
+    const sumX = l + r;
+    if (sumX > maxSumX && sumX > 0) {
+      const k = maxSumX / sumX;
+      l *= k;
+      r *= k;
+    }
+
+    const maxSumY = Math.max(0, outerH - minInnerH);
+    const sumY = t + b;
+    if (sumY > maxSumY && sumY > 0) {
+      const k = maxSumY / sumY;
+      t *= k;
+      b *= k;
+    }
+
+    return {
+      t: Math.max(0, Math.round(t)),
+      r: Math.max(0, Math.round(r)),
+      b: Math.max(0, Math.round(b)),
+      l: Math.max(0, Math.round(l)),
+    };
+  }
+
+  private computeViewportInsetsPx(outerW: number, outerH: number): { t: number; r: number; b: number; l: number } {
+    if (!this.hasViewportFrame() || !this.cfg.viewportFrameInsets) {
+      return { t: 0, r: 0, b: 0, l: 0 };
+    }
+
+    const spec = this.cfg.viewportFrameInsets;
+
+    if (spec.unit === "percent") {
+      const t = outerH * (spec.top / 100);
+      const b = outerH * (spec.bottom / 100);
+      const l = outerW * (spec.left / 100);
+      const r = outerW * (spec.right / 100);
+      return this.clampInsetsToMinInner(outerW, outerH, { t, r, b, l });
+    }
+
+    // framePx
+    if (this.frameNaturalW > 0 && this.frameNaturalH > 0) {
+      const sx = outerW / this.frameNaturalW;
+      const sy = outerH / this.frameNaturalH;
+      const t = spec.top * sy;
+      const b = spec.bottom * sy;
+      const l = spec.left * sx;
+      const r = spec.right * sx;
+      return this.clampInsetsToMinInner(outerW, outerH, { t, r, b, l });
+    }
+
+    return { t: 0, r: 0, b: 0, l: 0 };
+  }
+
+  private applyViewportInset(): void {
+    const { w, h } = this.getOuterSizePx();
+    const { t, r, b, l } = this.computeViewportInsetsPx(w, h);
+    this.viewportEl.style.inset = `${t}px ${r}px ${b}px ${l}px`;
+  }
+
+  private async loadViewportFrameNaturalSize(): Promise<void> {
+    const img = this.viewportFrameEl;
+    if (!img) return;
+    try { await img.decode(); } catch { /* ignore */ }
+    this.frameNaturalW = img.naturalWidth || 0;
+    this.frameNaturalH = img.naturalHeight || 0;
+  }
+  
   constructor(app: App, plugin: ZoomMapPlugin, el: HTMLElement, cfg: ZoomMapConfig) {
     super();
     this.app = app;
@@ -672,13 +758,9 @@ private async applyViewEditorResult(cfg: ViewEditorConfig): Promise<void> {
 
   private async bootstrap(): Promise<void> {
     this.el.classList.add("zm-root");
+    this.el.classList.toggle("zm-root--framepad", this.hasViewportFrame());	
     if (this.isCanvas()) this.el.classList.add("zm-root--canvas-mode");
     if (this.cfg.responsive) this.el.classList.add("zm-root--responsive");
-	
-	this.frameOverhangPx = this.getActiveFrameOverhangPx();
-	const pad2 = this.frameOverhangPx * 2;
-
-	this.el.classList.toggle("zm-root--framepad", this.frameOverhangPx > 0);
 
 	if (this.cfg.responsive) {
 	  setCssProps(this.el, {
@@ -687,8 +769,8 @@ private async applyViewEditorResult(cfg: ViewEditorConfig): Promise<void> {
 	  });
 	} else {
 	  setCssProps(this.el, {
-		width: this.addPxToCssSize(this.cfg.width ?? null, pad2),
-		height: this.addPxToCssSize(this.cfg.height ?? null, pad2),
+		width: this.cfg.width ?? null,
+		height: this.cfg.height ?? null,
 	  });
 	}
 
@@ -714,12 +796,7 @@ private async applyViewEditorResult(cfg: ViewEditorConfig): Promise<void> {
     (this.cfg.extraClasses ?? []).forEach((c) => this.el.classList.add(c));
 
     this.viewportEl = this.el.createDiv({ cls: "zm-viewport" });
-	
-	if (this.frameOverhangPx > 0) {
-	  this.viewportEl.style.inset = `${this.frameOverhangPx}px`;
-	} else {
-	  this.viewportEl.style.removeProperty("inset");
-	}
+    this.applyViewportInset();
 
     // Inner clip layer for all map rendering (keeps rounded corners)
     this.clipEl = this.viewportEl.createDiv({ cls: "zm-clip" });
@@ -735,17 +812,13 @@ private async applyViewEditorResult(cfg: ViewEditorConfig): Promise<void> {
     this.overlaysEl = this.worldEl.createDiv({ cls: "zm-overlays" });
     this.markersEl = this.worldEl.createDiv({ cls: "zm-markers" });
 
-    // Viewport frame (overhang allowed; pointer-events none)
-    if (this.cfg.viewportFrame && this.cfg.viewportFrame.trim()) {
-      const over = this.frameOverhangPx;
-      const img = this.viewportEl.createEl("img", { cls: "zm-viewport-frame" });
+    // Viewport frame (outer box)
+    if (this.hasViewportFrame()) {
+      this.frameLayerEl = this.el.createDiv({ cls: "zm-frame-layer" });
+      const img = this.frameLayerEl.createEl("img", { cls: "zm-viewport-frame" });
       img.decoding = "async";
       img.draggable = false;
-      img.src = this.resolveResourceUrl(this.cfg.viewportFrame.trim());
-      img.style.left = `${-over}px`;
-      img.style.top = `${-over}px`;
-      img.style.width = `calc(100% + ${over * 2}px)`;
-      img.style.height = `calc(100% + ${over * 2}px)`;
+      img.src = this.resolveResourceUrl(this.cfg.viewportFrame!.trim());
       this.viewportFrameEl = img;
     }
 
@@ -864,6 +937,14 @@ private async applyViewEditorResult(cfg: ViewEditorConfig): Promise<void> {
     await this.loadInitialBase(this.cfg.imagePath);
 
     if (this.cfg.responsive) this.updateResponsiveAspectRatio();
+	
+    if (this.viewportFrameEl && this.cfg.viewportFrameInsets?.unit === "framePx") {
+      await this.loadViewportFrameNaturalSize();
+      this.applyViewportInset();
+    } else {
+      this.applyViewportInset();
+    }
+
 
     await this.store.ensureExists(
     this.cfg.imagePath,
@@ -896,12 +977,8 @@ private async applyViewEditorResult(cfg: ViewEditorConfig): Promise<void> {
         }
       }
       if (this.shouldUseSavedFrame() && this.data.frame && this.data.frame.w > 0 && this.data.frame.h > 0) {
-	  const pad2 = this.frameOverhangPx * 2;
-	  setCssProps(this.el, {
-		width: `${this.data.frame.w + pad2}px`,
-		height: `${this.data.frame.h + pad2}px`,
-	  });
-	}
+        setCssProps(this.el, { width: `${this.data.frame.w}px`, height: `${this.data.frame.h}px` });
+      }
   }
 
     this.ro = new ResizeObserver(() => this.onResize());
@@ -2348,16 +2425,22 @@ private async applyViewEditorResult(cfg: ViewEditorConfig): Promise<void> {
   }
 
   private onResize(): void {
-    if (!this.ready || !this.data) {
-      if (this.isCanvas()) this.renderCanvas();
-      return;
-    }
+    if (!this.ready || !this.data) return;
+
+    const oldRect = this.viewportEl.getBoundingClientRect();
+    const oldVw = oldRect.width || this.vw || 1;
+    const oldVh = oldRect.height || this.vh || 1;
+
+    // Preserve the world position at the center while the viewport size changes.
+    const worldCx = (oldVw / 2 - this.tx) / this.scale;
+    const worldCy = (oldVh / 2 - this.ty) / this.scale;
+
+    this.applyViewportInset();
 
     const r = this.viewportEl.getBoundingClientRect();
     this.vw = r.width;
     this.vh = r.height;
 
-    // Update HUD pins first, based on new viewport size
     this.updateHudPinsForResize(r);
 
     if (this.cfg.responsive) {
@@ -2367,7 +2450,9 @@ private async applyViewEditorResult(cfg: ViewEditorConfig): Promise<void> {
       return;
     }
 
-    this.applyTransform(this.scale, this.tx, this.ty, true);
+    const txNew = this.vw / 2 - worldCx * this.scale;
+    const tyNew = this.vh / 2 - worldCy * this.scale;
+    this.applyTransform(this.scale, txNew, tyNew, true);
     this.renderMarkersOnly();
 
     if (
@@ -3590,7 +3675,7 @@ private onContextMenuViewport(e: MouseEvent): void {
             {
               label: "(No travel presets configured)",
               action: () => {
-                new Notice("Configure presets in Settings → Travel time.", 3000);
+                new Notice("Configure presets in settings → travel time.", 3000);
               },
             },
           ];
@@ -6059,9 +6144,9 @@ if (this.plugin.settings.enableTextLayers && this.data) {
     if (!this.data || !this.shouldUseSavedFrame()) return;
     if (!this.isFrameVisibleEnough(48)) return;
 
-    const vr = this.viewportEl.getBoundingClientRect();
-	const wNow = Math.round(vr.width);
-	const hNow = Math.round(vr.height);
+    const rr = this.el.getBoundingClientRect();
+    const wNow = Math.round(rr.width);
+    const hNow = Math.round(rr.height);
     if (wNow < 48 || hNow < 48) return;
 
     const prev = this.data.frame;

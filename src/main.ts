@@ -176,7 +176,13 @@ interface YamlOptions {
 
 
   viewportFrame?: string;
-  viewportFrameOverhang?: number | string;
+  viewportFrameInsets?: {
+    unit?: "framePx" | "percent";
+    top?: number | string;
+    right?: number | string;
+    bottom?: number | string;
+    left?: number | string;
+  };
 
 }
 
@@ -269,6 +275,43 @@ function parsePxNumber(value: unknown, fallback: number): number {
   return fallback;
 }
 
+function parseFrameInsetsYaml(v: unknown):
+  | { unit: "framePx" | "percent"; top: number; right: number; bottom: number; left: number }
+  | undefined {
+  if (!v || typeof v !== "object") return undefined;
+  const o = v as Record<string, unknown>;
+
+  const unit = o.unit === "percent" ? "percent" : "framePx";
+
+  const parsePercent = (x: unknown): number => {
+    if (typeof x === "number") return x;
+    if (typeof x === "string") {
+      let s = x.trim();
+      if (!s) return Number.NaN;
+      if (s.endsWith("%")) s = s.slice(0, -1).trim();
+      const n = Number(s.replace(",", "."));
+      return n;
+    }
+    return Number.NaN;
+  };
+
+  const parseFramePx = (x: unknown): number => {
+    return parsePxNumber(x, Number.NaN);
+  };
+
+  const top = unit === "percent" ? parsePercent(o.top) : parseFramePx(o.top);
+  const right = unit === "percent" ? parsePercent(o.right) : parseFramePx(o.right);
+  const bottom = unit === "percent" ? parsePercent(o.bottom) : parseFramePx(o.bottom);
+  const left = unit === "percent" ? parsePercent(o.left) : parseFramePx(o.left);
+
+  if (![top, right, bottom, left].every((n) => Number.isFinite(n) && n >= 0)) {
+    return undefined;
+  }
+
+  return { unit, top, right, bottom, left };
+}
+
+
 function parseAlign(v: unknown): "left" | "center" | "right" | undefined {
   if (v === "left" || v === "center" || v === "right") return v;
   return undefined;
@@ -353,7 +396,13 @@ export default class ZoomMapPlugin extends Plugin {
 		id: `map-${Date.now().toString(36)}`,
 
         viewportFrame: "",
-        viewportFrameOverhang: 0,
+        viewportFrameInsets: {
+          unit: "framePx",
+          top: 0,
+          right: 0,
+          bottom: 0,
+          left: 0,
+        },
       };
 
       new ViewEditorModal(this.app, initialConfig, (res) => {
@@ -394,6 +443,7 @@ export default class ZoomMapPlugin extends Plugin {
         const yamlBases = parseBasesYaml(opts.imageBases);
         const yamlOverlays = parseOverlaysYaml(opts.imageOverlays);
         const yamlMetersPerPixel = parseScaleYaml(opts.scale);
+        const yamlFrameInsets = parseFrameInsetsYaml(opts.viewportFrameInsets);
 		
 		let initialZoom: number | undefined;
 		let initialCenter: { x: number; y: number } | undefined;
@@ -542,7 +592,7 @@ export default class ZoomMapPlugin extends Plugin {
 		  initialZoom,
 		  initialCenter,
           viewportFrame: typeof opts.viewportFrame === "string" ? opts.viewportFrame.trim() : undefined,
-          viewportFrameOverhang: Math.max(0, parsePxNumber(opts.viewportFrameOverhang, 0)),
+          viewportFrameInsets: yamlFrameInsets,
 		};
 
         const inst = new MapInstance(this.app, this, el, cfg);
@@ -807,11 +857,16 @@ export default class ZoomMapPlugin extends Plugin {
     const frame = cfg.viewportFrame?.trim();
     if (frame) {
       obj.viewportFrame = frame;
-      const over =
-        typeof cfg.viewportFrameOverhang === "number"
-          ? Math.max(0, Math.round(cfg.viewportFrameOverhang))
-          : 0;
-      if (over > 0) obj.viewportFrameOverhang = over;
+
+      if (cfg.viewportFrameInsets) {
+        obj.viewportFrameInsets = {
+          unit: cfg.viewportFrameInsets.unit,
+          top: cfg.viewportFrameInsets.top,
+          right: cfg.viewportFrameInsets.right,
+          bottom: cfg.viewportFrameInsets.bottom,
+          left: cfg.viewportFrameInsets.left,
+        };
+      }
     }
 
     return stringifyYaml(obj).trimEnd();

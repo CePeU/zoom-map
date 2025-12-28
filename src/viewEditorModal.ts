@@ -25,7 +25,13 @@ export interface ViewEditorConfig {
   markerLayers: string[];
   id?: string;
   viewportFrame?: string;
-  viewportFrameOverhang?: number;
+  viewportFrameInsets?: {
+    unit: "framePx" | "percent";
+    top: number;
+    right: number;
+    bottom: number;
+    left: number;
+  };
 }
 
 export interface ViewEditorResult {
@@ -55,9 +61,13 @@ export class ViewEditorModal extends Modal {
     this.cfg.resizeHandle ||= "right";
 
     if (typeof this.cfg.viewportFrame !== "string") this.cfg.viewportFrame = "";
-    const over = Number(this.cfg.viewportFrameOverhang ?? 0);
-    this.cfg.viewportFrameOverhang =
-      Number.isFinite(over) && over >= 0 ? Math.round(over) : 0;
+    this.cfg.viewportFrameInsets ??= {
+      unit: "framePx",
+      top: 0,
+      right: 0,
+      bottom: 0,
+      left: 0,
+    };
   }
   
   private factorToPercentString(f?: number): string {
@@ -459,14 +469,15 @@ export class ViewEditorModal extends Modal {
     contentEl.createEl("h3", { text: "Viewport frame" });
 
     let frameInputEl: HTMLInputElement | null = null;
-
+    const insets = this.cfg.viewportFrameInsets!;
+	
     const frameSetting = new Setting(contentEl)
       .setClass("zoommap-view-editor-row")
       .setName("Frame image (optional)")
-      .setDesc("Drawn above the map (does not block mouse). Supports overhang.");
+      .setDesc("Drawn above the map. Supports overhang.");
 
     frameSetting.addText((t) => {
-      t.setPlaceholder("Path to frame image (png/svg) or data:URL");
+      t.setPlaceholder("Path to frame image.");
       t.setValue(this.cfg.viewportFrame ?? "");
       frameInputEl = t.inputEl;
       t.onChange((v) => {
@@ -491,21 +502,41 @@ export class ViewEditorModal extends Modal {
       }),
     );
 
-    new Setting(contentEl)
+    const unitSetting = new Setting(contentEl)
       .setClass("zoommap-view-editor-row")
-      .setName("Frame overhang (px)")
-      .setDesc("Extra pixels the frame extends beyond the map border.")
-      .addText((t) => {
-        t.inputEl.type = "number";
-        t.inputEl.classList.add("zoommap-view-editor-input--short");
-        t.setPlaceholder("0");
-        t.setValue(String(this.cfg.viewportFrameOverhang ?? 0));
-        t.onChange((v) => {
-          const n = Number(v);
-          this.cfg.viewportFrameOverhang =
-            Number.isFinite(n) ? Math.max(0, Math.round(n)) : 0;
-        });
+      .setName("Viewport insets unit")
+      .setDesc('framePx = values in the frame image pixel space; percent = 0..100 of the outer box.');
+
+    unitSetting.addDropdown((d) => {
+      d.addOption("framePx", "framePx");
+      d.addOption("percent", "percent");
+      d.setValue(insets.unit);
+      d.onChange((v) => {
+        insets.unit = (v === "percent" ? "percent" : "framePx");
       });
+    });
+
+    const insetRow = (label: string, key: "top" | "right" | "bottom" | "left") => {
+      new Setting(contentEl)
+        .setClass("zoommap-view-editor-row")
+        .setName(`Inset ${label}`)
+        .addText((t) => {
+          t.inputEl.type = "number";
+          t.inputEl.classList.add("zoommap-view-editor-input--short");
+          t.setPlaceholder("0");
+          t.setValue(String(insets[key] ?? 0));
+          t.onChange((v) => {
+            const n = Number(String(v).replace(",", "."));
+            if (!Number.isFinite(n) || n < 0) return;
+            insets[key] = Math.round(n);
+          });
+        });
+    };
+
+    insetRow("Top", "top");
+    insetRow("Right", "right");
+    insetRow("Bottom", "bottom");
+    insetRow("Left", "left");
 
     /* -------- Footer -------- */
     const footer = contentEl.createDiv({ cls: "zoommap-modal-footer" });
@@ -525,11 +556,9 @@ export class ViewEditorModal extends Modal {
       // Normalize viewport frame values
       const frame = (this.cfg.viewportFrame ?? "").trim();
       this.cfg.viewportFrame = frame.length ? frame : undefined;
-	  const over = Number(this.cfg.viewportFrameOverhang ?? 0);
-	  this.cfg.viewportFrameOverhang =
-		this.cfg.viewportFrame && Number.isFinite(over)
-		  ? Math.max(0, Math.round(over))
-		  : 0;
+      if (!this.cfg.viewportFrame) {
+        this.cfg.viewportFrameInsets = undefined;
+      }
 
 	  this.close();
 	  this.onResult({ action: "save", config: this.cfg });
