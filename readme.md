@@ -1,68 +1,87 @@
-# Zoom Map
-A lightweight Obsidian plugin to place interactive markers on a zoomable, pannable image. Supports multiple base images and toggleable PNG overlays, marker layers, hover previews, a ruler (measure distances), HUD pins, and an optional Canvas render mode for smoother performance on mobile.
+# Zoom Map (Obsidian Plugin)
+
+Zoom Map lets you embed an image as an interactive, zoomable map inside Obsidian and place markers, stickers, drawings, measurements, HUD pins and (optionally) editable text layers on top.
+
+Joshua Plunkett (obsidianttrpgtutorials.com) made a video about it. It’s a bit outdated, so I’d still recommend checking the README.
+[![Watch video](assets/maxresdefault.jpg)](https://youtu.be/rB4MCgl44lU)
 
 ## Features
 
-- **Pan and zoom**
-  - Mouse: wheel, double‑click, drag to pan
-  - Mobile: pinch‑zoom, two‑finger pan
-  - Panning clamped to image bounds
+### Core map interaction
+- Pan/zoom image (mouse wheel, double click, drag)
+- Mobile gestures: pinch zoom, two-finger pan
+- Optional pan clamping to image bounds (toggle in map context menu)
+- Multiple maps per note (multiple `zoommap` code blocks)
 
-- **Markers & stickers**
-  - Add markers (Shift+Click or via context menu), drag to move, edit/delete via modal
-  - Marker layers with visibility toggles and lock
-  - Bind layers to specific base images (auto‑show/hide when switching base)
-  - Stickers: image markers that scale with the map (decals)
+### Marker system
+- Add markers (Shift + click or context menu)
+- Drag markers to move them
+- Edit markers in a modal (icon, link, tooltip, zoom range, etc.)
+- Delete markers via context menu
+- Marker layers: visibility + lock toggles
+- Optional: bind a marker layer to a specific base image
 
-- **HUD pins (viewport‑bound)**
-  - “Add HUD pin here” from the context menu
-  - Pins stick to viewport edges/center (left/right/center, top/bottom/center)
-  - Stable behavior when resizing the map; manual drags re‑classify the pin’s mode
+### Icons, stickers, swap pins
+- Configurable icon library (data URLs or vault images)
+- Per-map pin size overrides (“Pin sizes for this map…”)
+- Stickers (image decals) with per-sticker size
+- Swap pins: right click cycles through frames (icons/link per frame)
+ - Access under collections
 
-- **Icons & sizes**
-  - Marker icons configurable in plugin settings (key, file/data URL, size, anchor X/Y)
-  - Per‑map pin sizes: context menu “Pin sizes for this map…” to override icon sizes per map
+### Hover previews & tooltips
+- Markers with a link show the native Obsidian hover popover
+- Markers without a link can show an internal tooltip (stable, rendered inside the map)
 
-- **Hover previews**
-  - Marker with link → uses Obsidian’s hover popover
-  - Marker without link → inline tooltip rendered inside the map
+### Image layers
+- Multiple base images (switchable via context menu)
+- Image overlays (toggleable via context menu)
+- Overlay lazy loading for performance
 
-- **Image bases & overlays**
-  - Multiple base images and PNG/WebP/SVG/JPG overlays
-  - Overlays load on demand and unload when hidden
+### Ruler / measurement
+- Measure distances by clicking points (multi-segment)
+- Calibrate scale per base image
+- Units: auto metric/imperial, m/km/mi/ft, and custom units
+- Optional travel time presets (distance → time conversions)
 
-- **Ruler & scale**
-  - Measure multi‑segment distances with live HUD readout
-  - Units: auto metric/imperial, m/km/mi/ft, plus custom (fantasy) units
-  - Per‑base calibration via context menu (Measure → Calibrate scale…)
+### Drawing tools (Settings→Presets)
+- Draw layers (visibility/lock)
+- Draw shapes: rectangle, circle, polygon
+- Pattern fills are stored as SVG files for reliability across restarts
 
-- **Per‑marker extras (pins)**
-  - Min/Max zoom visibility (now in percent: 100, 150, 300…)
-  - “Scale like sticker” option (pins scale with the map instead of staying screen‑constant)
+### Text layers (Settings→Presets)
+- Box-based text layers with drawn baselines
+- Inline typing directly on the map (one input per baseline)
+- Auto-flow between baselines (push overflow forward, pull words back)
+- Optional angled baselines (Ctrl while drawing baseline)
+- Lock text layers to prevent edits
 
-- **Layout & rendering**
-  - Per‑block size and resize handles; multiple maps per note supported
-  - Responsive mode (width 100%, height from aspect‑ratio) for non‑interactive display blocks
-  - Optional Canvas render mode for smoother performance on mobile/large images
-  - Persistent window size (when resizable) saved to JSON and restored automatically
+### Render modes
+- DOM (default)
+- Canvas render mode for weaker devices (tablets/mobile)
 
-- **Storage**
-  - JSON marker files beside the image (`<image>.markers.json`)
-  - Optional inline storage in the note (hidden comment block)
-  - Files only rewritten when content actually changes
+### Storage
+- Default: JSON marker file beside the image: `<image>.markers.json`
+- Optional inline storage inside the note (`storage: note`)
+- Writes are throttled and only saved when content actually changed
 
-## Quick start
+---
 
-### 1) Install (manual)
+## Installation (manual)
+- Create folder: <your-vault>/.obsidian/plugins/zoom-map
+- Copy build output into that folder: manifest.json, main.js, styles.css
+- Reload Obsidian → Settings → Community plugins → enable Zoom Map
 
-- Create folder: `<your-vault>/.obsidian/plugins/zoom-map`
-- Copy build output into that folder: `manifest.json`, `main.js`, `styles.css`
-- Reload Obsidian → Settings → Community plugins → enable **Zoom Map**
+---
 
-[Watch the demo video](https://youtu.be/MkuvFwk1obs)
+## Usage
 
-### 2) Add a code block to a note
+Simple Mode
+- Use the command "Zoom Map: Insert new map...". You have to be in edit mode to insert a new map this way.
+ - A modal opens and you can set up your image layers, overlay layers and so on.
+ - On a map right click→Options→Edit view... brings you back to this setup.
 
+Pro Mode (no benefits included)
+Add a code block: 
 ~~~
 ```zoommap
 image: Assets/Map.jpg
@@ -93,196 +112,129 @@ wrap: true               # wrap text; useful with left/right alignment
 ```
 ~~~
 
-### 3) Interact
+### Add markers
+- **Shift + click** on the map  
+  or
+- **Right click** the map → “Add marker here”
 
-- **Add markers**
-  - Shift+Click on the map, or use the context menu → “Add marker here”
-  - Drag markers to move; right‑click markers to edit/delete
-- **HUD pins**
-  - Right‑click map → “Add HUD pin here” to add a viewport‑bound pin
-- **Context menu (right‑click empty map)**
-  - Add marker / HUD pin / stickers / favorites
-  - Zoom in/out, fit, reset view
-  - Image layers (bases/overlays)
-  - Marker layers (visibility/lock, bind layer to base)
-  - Measure (start/stop, clear, unit, calibrate scale)
-  - Pin sizes for this map…
-- **Hover a marker**
-  - With `link` → Obsidian hover preview
-  - Without link → inline tooltip
+### Edit / delete markers
+- Right click a marker → edit/delete
 
-## YAML options (per code block)
+---
 
-- `image`: string (required if `imageBases` is empty)
-- `markers`: string (optional; default is `<image>.markers.json`)
-- `minZoom` / `maxZoom`:
-  - Map‑level zoom limits
-  - Accept raw factors (e.g. `0.25`, `4`) or strings with `%` (e.g. `"150%"`)
-- `width` / `height`: CSS size (e.g., `560px`, `60vh`, `100%`)
-- `resizable`: boolean (when true, window size is persisted to JSON)
-- `resizeHandle`: `left | right | both | native`
-- `render`: `dom | canvas`
-- `responsive`: `true | false`  
-  `true` = map always fits width, zoom/pan gestures disabled; markers remain interactive
-- `storage`: `json | note`
-  - `json`: beside image (default)
-  - `note`: inline hidden block inside the note
-- `id`: optional map id (useful with `storage: note`)
-- `align`: `left | center | right`
-- `wrap`: `true | false` (text wraps around the map when left/right aligned)
+## YAML options
 
-### Image bases & overlays (optional)
+### Required
+- `image: string`  
+  Path to the base image (vault path or link target)
 
-~~~
-```yaml
+### Optional map view
+- width: 200px
+- height: 200px
+- minZoom: number | 150%  
+- maxZoom: number | 300%
+- render: dom | canvas
+- resizable: true
+- resizeHandle: native | left | right | both
+- responsive: true #If true: map fits to width; zoom/pan gestures are disabled
+- wrap: true 
+- align: left|center|right
+- storage: json | note
+- id: string #(recommended if storage: note)
+
+### Base images & overlays
 imageBases:
-  - { path: Assets/BaseA.png, name: "A" }
-  - { path: Assets/BaseB.png, name: "B" }
+  - path: Assets/BaseA.png
+    name: Base A
+  - path: Assets/BaseB.png
+    name: Base B
 
 imageOverlays:
-  - { path: Assets/roads.png,  name: "Roads",  visible: false }
-  - { path: Assets/labels.png, name: "Labels", visible: true }
+  - path: Assets/overlay-roads.png
+    name: Roads
+    visible: true
+  - path: Assets/overlay-labels.png
+    name: Labels
+    visible: false
+
+### Scale / calibration
+- scale:
+  metersPerPixel: 0.25
+or:
+- scale:
+   pixelsPerMeter: 4
+
+---
+
+## Viewport frame
+
+You can render a transparent frame image *above* the map (e.g. RPG UI frames).
+The map viewport is defined by **4-sided insets**, which scale with the frame.
+
+- viewportFrame: Assets/frame.png
+- viewportFrameInsets:
+  unit: framePx     # framePx | percent
+  top: 140
+  right: 110
+  bottom: 170
+  left: 110
+
+### Notes
+- framePx is recommended:
+  - values are measured in the frame image’s original pixel space
+  - they automatically scale correctly when resizing
+
+---
+
+## Settings overview
+
+### Preferences (global)
+- Enable drawing tools
+- Enable text layers
+- Pins: “scale like sticker” by default
+- Prefer first visible unlocked marker layer for new markers
+
+### Icon library
+- Add/edit icons (key, path/data URL, size, anchor X/Y, rotation)
+- SVG icon picker (SVG Folder)
+ - Use your own or download Font Awesome or rpg awesome SVG's library.
+ - Unzip the SVG library from Font or RPG Awesome
+ - If you don't find your SVG's maybe then the folder path is too long.
+- Optional SVG outline tool (adds a stroke layer inside SVG)
+
+### Collections (base-bound)
+Collections define which pins/favorites/stickers/swap pins appear in the map context menu,
+depending on the active base image.
+
+### Ruler
+- Line color + width
+- Custom units
+- Travel time presets
+
+---
+
+## Marker JSON format (high level)
+
+Marker files are stored as `<image>.markers.json` and include:
+- `bases`, `overlays`, `activeBase`
+- `layers`, `markers`
+- `measurement` (scale per base)
+- `pinSizeOverrides`
+- `drawLayers`, `drawings`
+- `textLayers`
+
+---
+
+## Development
+
+```bash
+npm install
+npm run dev    # watch build
+npm run build  # production build
 ```
-~~~
 
-### Scale (optional)
-
-You can also calibrate via the context menu: **Measure → Calibrate scale…**
-~~~
-```yaml
-image: Assets/Map.jpg
-scale:
-  metersPerPixel: 0.25     # or use pixelsPerMeter: 4
-```
-~~~
-
-## Marker storage
-
-- **JSON (default)**  
-  Plain JSON file next to the image: `<image>.markers.json`
-- **Inline (optional)**  
-  Set `storage: note` in YAML to store data inside the note as a hidden comment block:
-
-  ```text
-  %%
-  ZOOMMAP-DATA id=map-123
-  { ... JSON ... }
-  /ZOOMMAP-DATA
-  %%
-  ```
-
-- Marker files are only rewritten when the serialized content actually changes.
-
-## Marker editing (modal)
-
-- **Link**
-  - Enter a wiki‑link path without brackets (e.g. `Folder/Note` or `Note#Heading`)
-  - Do not include `[[…]]` – the plugin expects the plain linktext
-  - Suggestions popup with notes and headings is available while typing
-- **Tooltip**: optional plain text rendered as an inline tooltip
-- **Icon**: choose one of your configured icons
-- **Layer**: choose existing layer or type a new layer name
-- **Zoom range (optional, pins only)**
-  - `Min zoom` / `Max zoom` in percent (e.g. `100`, `150`, `300`)
-  - Leave empty to show the pin at all zoom levels
-  - Values are normalized and clamped to the map’s zoom range
-- **Scale like sticker (pins only)**
-  - When enabled, the pin scales with the map (like stickers)
-  - When disabled (default), pins keep a constant screen size (inverse scaling wrapper)
-
-## Stickers
-
-- Image markers that always scale with the map (size = pixels at image scale, e.g. `64`).
-- Can be defined via Collections (see below) and placed from the context menu:
-  - “Add marker here → Stickers (base/global)”
-
-## Collections (base‑bound menus)
-
-- Settings → **Collections (base‑bound)** lets you define which items appear in the context menu, depending on the active base image:
-  - **Pins**: by icon key from your icon library
-  - **Favorites**: presets with name, optional layer, link template, and “open editor” flag
-  - **Stickers**: image path + size + optional layer
-- Bindings:
-  - Add base image paths to bind a collection to specific bases
-  - Create a **global** collection (no bindings) for items that should be available everywhere
-- Collections populate the context menu under:
-  - `Pins (base/global)`
-  - `Favorites (base/global)`
-  - `Stickers (base/global)`
-
-## Settings (plugin)
-
-- **Storage default**
-  - Where new maps store their markers: JSON file beside image or inline in the note
-- **Marker icons (library)**
-  - Key, path or data URL, size, anchor X/Y
-  - Anchor X/Y are in icon pixels; defines the point that “sticks” to the map  
-    - For “grow around center”: use X≈size/2, Y≈size/2  
-    - For “pin tip on coordinate”: use tip position (e.g. size 24 → X=12, Y=24)
-- **Pin sizes for this map…**
-  - Per‑map overrides for icon sizes, available from the map’s context menu
-- **Wheel zoom factor**
-- **Panning button**: left or middle
-- **Hover popover size** (max width/height)
-- **Force popovers without Ctrl/Cmd**
-- **Ruler style**
-  - Line color (CSS color) and width (px)
-- **Custom units**
-  - Define fantasy/custom distance units (`name`, `abbreviation`, `metersPerUnit`)
-  - Select them via context menu → Measure → Unit
-- **Collections (base‑bound)**
-  - Configure pins/favorites/stickers per base image
-- **Library file (icons + collections)**
-  - Choose a JSON file in your vault to export/import your icon library + collections
-- **Font awesome integration**
-  - Configure a Font Awesome SVG folder in your vault
-  - Download the free web ZIP directly into that folder
-  - Pick SVGs via a grid‑based icon picker, then create recolored icons from them
-
-## Image layers from the menu
-
-- Right‑click empty map → **Image layers**:
-  - Switch bases and overlays
-  - “Add layer → Base/Overlay…” to pick additional files
-- Marker layers can be bound to a base and will auto‑toggle when switching base.
-
-## Canvas vs DOM
-
-- **DOM mode** (default): HTML `<img>` + absolutely positioned markers
-- **Canvas mode**:
-  - Base + visible overlays are composited per frame
-  - Often reduces flicker and improves performance on mobile / large images
-  - Overlays are loaded/unloaded dynamically to limit memory usage
-
-## Responsive mode
-
-- `responsive: true` makes the map fill the available width; height is derived from the image aspect ratio.
-- Zoom/pan gestures (wheel, double‑click, pinch, drag‑to‑pan) are disabled.
-- Markers remain interactive (hover, click, add/edit via context menu).
-
-## Persistent window size
-
-- When `resizable: true` and **not** in responsive mode:
-  - The current map window size is saved to JSON as `frame: { w, h }`
-  - On next load, this size is restored (unless explicit `width`/`height` are set in YAML)
-
-## Tips
-
-- Keep base + overlay images at identical dimensions.
-- Use optimized PNG/WebP for large layers.
-- If flicker appears on mobile, try `render: canvas`.
-- For classic pin behavior (tip sits on the coordinate), set the anchor to the visual tip.
-- For “grow around center”, anchor at the visual center of the icon.
-
-## Build (for developers)
-
-- Requirements: Node 18+ recommended
-- Install deps: `npm install`
-- Dev build (watch): `npm run dev`
-- Production build: `npm run build`
-- Copy `manifest.json`, `main.js`, `styles.css` into your vault’s  
-  `.obsidian/plugins/zoom-map` folder
+---
 
 ## License
-
-MIT. Not affiliated with or endorsed by Obsidian.
+MIT
+```
