@@ -1,6 +1,6 @@
-# Zoom Map (Obsidian Plugin)
+# TTRPG Tools: Maps (Obsidian Plugin)
 
-Zoom Map lets you embed an image as an interactive, zoomable map inside Obsidian and place markers, stickers, drawings, measurements, HUD pins and (optionally) editable text layers on top.
+This Map tool lets you embed an image as an interactive, zoomable map inside Obsidian and place markers, stickers, drawings, measurements, HUD pins and (optionally) editable text layers on top.
 
 Joshua Plunkett (obsidianttrpgtutorials.com) made a video about it. It’s a bit outdated, so I’d still recommend checking the README.
 [![Watch video](assets/maxresdefault.jpg)](https://youtu.be/rB4MCgl44lU)
